@@ -19,28 +19,37 @@ body{margin:0}
 .tti{font-family:'Inter',sans-serif;color:var(--navy);background:var(--paper);min-height:100vh;display:flex}
 .tti h1,.tti h2,.tti h3,.tti .disp{font-family:'Archivo',sans-serif;letter-spacing:-.01em}
 .mono{font-family:'JetBrains Mono',monospace}
-.side{width:232px;flex-shrink:0;background:linear-gradient(180deg,var(--navy),var(--ink));color:#fff;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+.side{width:250px;flex-shrink:0;background:linear-gradient(180deg,var(--navy),var(--ink));color:#fff;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
 .side::after{content:'';position:absolute;right:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,var(--azure),transparent 60%)}
-.brand{padding:22px 20px 18px;border-bottom:1px solid var(--dark-line)}
-.brand b{font-family:'Archivo';font-weight:800;font-size:17px;display:block}
-.brand span{font-size:11px;color:var(--azure2);letter-spacing:.14em;text-transform:uppercase;font-weight:600}
-.nav{padding:12px 10px;display:flex;flex-direction:column;gap:2px}
-.nav button{display:flex;align-items:center;gap:11px;width:100%;padding:11px 12px;border:0;background:transparent;color:rgba(255,255,255,.72);font:600 13.5px 'Inter';border-radius:9px;cursor:pointer;text-align:left;transition:background .15s,color .15s}
-.nav button:hover{background:rgba(255,255,255,.06);color:#fff}
-.nav button.on{background:rgba(30,130,230,.18);color:#fff;box-shadow:inset 3px 0 0 var(--azure)}
+.brand{padding:22px 20px 18px;border-bottom:1px solid var(--dark-line);display:flex;align-items:center;gap:11px}
+.brand .mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--azure2),var(--azure) 55%,var(--navy));flex-shrink:0;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(30,130,230,.35)}
+.brand b{font-family:'Archivo';font-weight:800;font-size:16px;display:block;line-height:1.2}
+.brand span{font-size:10.5px;color:var(--azure2);letter-spacing:.14em;text-transform:uppercase;font-weight:600}
+.nav{padding:14px 10px;overflow-y:auto;flex:1}
+.navgroup{margin-bottom:16px}
+.navgroup:last-child{margin-bottom:0}
+.navgroup .lbl2{padding:0 12px 6px;font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.38)}
+.nav button{position:relative;display:flex;align-items:center;gap:11px;width:100%;padding:10px 12px;border:0;background:transparent;color:rgba(255,255,255,.72);font:600 13.5px 'Inter';border-radius:9px;cursor:pointer;text-align:left;transition:background .15s,color .15s;margin-bottom:2px}
+.nav button:hover{background:rgba(255,255,255,.07);color:#fff}
+.nav button.on{background:rgba(30,130,230,.2);color:#fff;box-shadow:inset 3px 0 0 var(--azure)}
+.nav button .navbadge{margin-left:auto;flex-shrink:0;min-width:19px;height:19px;padding:0 5px;border-radius:999px;background:var(--azure);color:#fff;font:700 10.5px 'Inter';display:flex;align-items:center;justify-content:center}
+.nav button.on .navbadge{background:#fff;color:var(--azure)}
 .nav button:focus-visible,.tti button:focus-visible,.tti input:focus-visible,.tti select:focus-visible,.tti textarea:focus-visible{outline:2px solid var(--azure);outline-offset:2px}
 .side .foot{margin-top:auto;padding:16px 20px;font-size:11px;color:rgba(255,255,255,.45);border-top:1px solid var(--dark-line)}
 .main{flex:1;min-width:0;padding:26px 30px 60px}
 .pagehead{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin-bottom:20px;flex-wrap:wrap}
 .pagehead h1{margin:0;font-size:24px;font-weight:800}
 .pagehead p{margin:4px 0 0;color:var(--slate);font-size:13.5px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px}
-.btn{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:9px;padding:10px 15px;font:600 13.5px 'Inter';cursor:pointer;transition:filter .15s}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 2px rgba(12,35,64,.04)}
+.card.hoverable{cursor:pointer;transition:box-shadow .15s,border-color .15s,transform .15s}
+.card.hoverable:hover{box-shadow:0 6px 20px rgba(12,35,64,.09);border-color:#c8d7ea;transform:translateY(-1px)}
+.btn{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:9px;padding:10px 15px;font:600 13.5px 'Inter';cursor:pointer;transition:filter .15s,box-shadow .15s}
 .btn:hover{filter:brightness(1.06)}
-.btn.pri{background:var(--azure);color:#fff}
+.btn.pri{background:var(--azure);color:#fff;box-shadow:0 2px 8px rgba(30,130,230,.3)}
 .btn.dark{background:var(--navy);color:#fff}
 .btn.ghost{background:#EDF2F9;color:var(--navy)}
 .btn.danger{background:#FBEAEA;color:var(--bad)}
+.btn.lg{padding:13px 20px;font-size:14.5px;border-radius:11px}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .tti input,.tti select,.tti textarea{font:500 13.5px 'Inter';color:var(--navy);background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 11px;width:100%}
 .tti textarea{resize:vertical}
@@ -67,25 +76,38 @@ body{margin:0}
 .chip:hover{border-color:var(--azure)}
 .drawer{position:fixed;inset:0;background:rgba(7,26,48,.45);z-index:50;display:flex;justify-content:flex-end}
 .drawer .panel{width:min(680px,100%);background:var(--paper);height:100%;overflow-y:auto;padding:24px 26px}
-.tabs{display:flex;gap:4px;border-bottom:2px solid var(--line);margin:18px 0 18px}
-.tabs button{border:0;background:none;font:700 13px 'Inter';color:var(--slate);padding:9px 13px;cursor:pointer;border-bottom:2.5px solid transparent;margin-bottom:-2px}
-.tabs button.on{color:var(--azure);border-color:var(--azure)}
+.tabs{display:flex;flex-wrap:wrap;align-items:center;gap:3px 2px;border-bottom:2px solid var(--line);margin:18px 0 18px;padding-bottom:2px}
+.tabs button{border:0;background:none;font:700 12.5px 'Inter';color:var(--slate);padding:8px 11px;cursor:pointer;border-bottom:2.5px solid transparent;margin-bottom:-2px;border-radius:6px 6px 0 0;white-space:nowrap}
+.tabs button:hover{color:var(--navy);background:#F2F7FD}
+.tabs button.on{color:var(--azure);border-color:var(--azure);background:#EAF3FE}
+.tabs .div{width:1px;align-self:stretch;background:var(--line);margin:4px 3px}
 .kv{display:grid;grid-template-columns:150px 1fr;gap:6px 12px;font-size:13.5px}
 .kv b{color:var(--slate);font-weight:600}
 .bar{height:7px;border-radius:999px;background:#E7EDF6;overflow:hidden}
 .bar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--azure),var(--azure2))}
 .prose{font-size:14px;line-height:1.62}
 .prose h3{font-size:15px;margin:16px 0 6px}
+.disclose{margin-top:20px}
+.disclose>summary{cursor:pointer;font:700 12.5px 'Inter';color:var(--slate);list-style:none;display:flex;align-items:center;gap:6px;padding:8px 2px;user-select:none}
+.disclose>summary::-webkit-details-marker{display:none}
+.disclose>summary::before{content:'▸';font-size:10px;transition:transform .15s}
+.disclose[open]>summary::before{transform:rotate(90deg)}
+.disclose>summary:hover{color:var(--navy)}
 @media(max-width:860px){
   .tti{flex-direction:column}
   .side{width:100%;height:auto;position:static;flex-direction:row;align-items:center}
   .side::after{display:none}
   .brand{border:0;padding:14px 16px}
-  .nav{flex-direction:row;padding:8px;overflow-x:auto}
-  .nav button span{display:none}
+  .nav{display:flex;flex-direction:row;padding:8px;overflow-x:auto}
+  .navgroup{display:flex;margin-bottom:0}
+  .navgroup .lbl2{display:none}
+  .nav button{margin-bottom:0}
+  .nav button .navbadge{position:absolute;top:4px;right:4px;min-width:15px;height:15px;font-size:9px}
+  .nav button span:not(.navbadge){display:none}
   .side .foot{display:none}
   .main{padding:18px 14px 60px}
   .kv{grid-template-columns:1fr}
+  .drawer .panel{width:100%}
 }
 @media(prefers-reduced-motion:reduce){.pane .film{transition:none}}
 `;
@@ -228,7 +250,7 @@ function greeting(){
   return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
 }
 
-function Dashboard({opps, setView, openOpp}){
+function Dashboard({opps, setView, openOpp, goDiscovery, pendingLeads}){
   const [d,setD] = useState(null);
   const [err,setErr] = useState("");
 
@@ -259,8 +281,24 @@ function Dashboard({opps, setView, openOpp}){
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
           <Notifications openOpp={openOpp}/>
-          <button className="btn pri" onClick={setView}><Plus size={16}/>Add opportunity</button>
+          <button className="btn ghost" onClick={setView}><Plus size={16}/>Add opportunity</button>
+          <button className="btn pri" onClick={goDiscovery}><Rss size={16}/>Find leads</button>
         </div>
+      </div>
+
+      <div className={"card"+(goDiscovery?" hoverable":"")} style={{padding:"16px 20px",marginBottom:18,display:"flex",alignItems:"center",gap:16,flexWrap:"wrap",background:pendingLeads>0?"linear-gradient(90deg,#EAF3FE,#fff)":undefined,borderColor:pendingLeads>0?"var(--azure2)":undefined}} onClick={goDiscovery}>
+        <div style={{width:44,height:44,borderRadius:11,background:pendingLeads>0?"var(--azure)":"#EDF2F9",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+          <Rss size={20} color={pendingLeads>0?"#fff":"var(--slate)"}/>
+        </div>
+        <div style={{flex:1,minWidth:200}}>
+          <div style={{fontWeight:800,fontSize:15}}>
+            {pendingLeads>0 ? `${pendingLeads} new film & tinting lead${pendingLeads>1?"s":""} waiting` : "Discovery scans overnight for new tinting work"}
+          </div>
+          <div style={{fontSize:12.5,color:"var(--slate)",marginTop:2}}>
+            {pendingLeads>0 ? "Review and import them into your pipeline." : "21 public bid boards and SAM.gov, filtered to real film & tinting scope."}
+          </div>
+        </div>
+        <ChevronRight size={18} style={{color:"var(--slate)",flexShrink:0}}/>
       </div>
 
       <div className="statgrid">
@@ -2116,8 +2154,19 @@ function OppDrawer({opp, onClose, onUpdate, onDelete, proposal, setProposal}){
         </div>
 
         <div className="tabs" role="tablist">
-          {[["overview","Overview"],["build","Build Bid"],["pursue","Pursue"],["analyze","Analyze"],["ask","Ask"],["checklist","Checklist"],["addenda","Addenda"],["score","AI Score"],["takeoff","Takeoff"],["win","Win It"],["proposal","Proposal"],["cost","Job Cost"]].map(([k,l])=>(
-            <button key={k} className={tab===k?"on":""} onClick={()=>setTab(k)} role="tab" aria-selected={tab===k}>{l}</button>
+          {[
+            [["overview","Overview"],["score","AI Score"]],
+            [["analyze","Analyze"],["addenda","Addenda"],["checklist","Checklist"]],
+            [["takeoff","Takeoff"],["build","Build Bid"],["proposal","Proposal"]],
+            [["ask","Ask"],["pursue","Pursue"],["win","Win It"]],
+            [["cost","Job Cost"]],
+          ].map((group,gi)=>(
+            <span key={gi} style={{display:"contents"}}>
+              {gi>0 && <span className="div" aria-hidden="true"/>}
+              {group.map(([k,l])=>(
+                <button key={k} className={tab===k?"on":""} onClick={()=>setTab(k)} role="tab" aria-selected={tab===k}>{l}</button>
+              ))}
+            </span>
           ))}
         </div>
 
@@ -2551,22 +2600,6 @@ function Discovery({onImported}){
       })()}
       {msg && <p style={{color:"var(--good)",fontSize:13.5,margin:"0 0 12px"}}><CheckCircle2 size={14} style={{verticalAlign:-2}}/> {msg}</p>}
       {err && <p style={{color:"var(--bad)",fontSize:13.5,margin:"0 0 12px"}}><AlertTriangle size={14} style={{verticalAlign:-2}}/> {err}</p>}
-      <LeadTester/>
-      <p style={{fontSize:12.5,color:"var(--slate)",margin:"0 0 14px"}}>21 sources: SAM.gov federal API, Missouri FMDC + MissouriBUYS, Kansas state, Jackson/Johnson/Wyandotte counties, 16th Circuit, KCMO + Independence, Lee's Summit, Overland Park, Olathe, and Lenexa city halls, 4 school districts, KCI, KU Med, and KU. Graded for YOUR scope: "Film & tinting" means the posting actually names film or tinting work — those are your jobs. "Glazing upsell" is window and glass work where film can be pitched as an add-on. Blinds, shades, window cleaning, auto glass, and unrelated trades are filtered out automatically. Nothing bypasses logins or terms of service.</p>
-      {sources && (
-        <div className="card" style={{padding:14,marginBottom:14}}>
-          <div style={{fontSize:12,fontWeight:700,letterSpacing:".07em",textTransform:"uppercase",color:"var(--slate)",marginBottom:8}}>Source status — last scan</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:"6px 14px"}}>
-            {sources.map(s=>(
-              <div key={s.id} style={{display:"flex",alignItems:"center",gap:7,fontSize:12.5}} title={s.error||""}>
-                <span style={{width:8,height:8,borderRadius:99,flexShrink:0,background:s.status==="ok"?"var(--good)":s.status==="skipped"?"#9AA7B8":s.status==="js-portal"?"var(--warn)":"var(--bad)"}}/>
-                <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name}</span>
-                <span className="mono" style={{marginLeft:"auto",color:"var(--slate)"}}>{s.status==="ok"?s.found:s.status==="js-portal"?"JS":s.status==="skipped"?"–":"err"}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
       {leads===null && <p style={{color:"var(--slate)",fontSize:13.5}}>Loading…</p>}
       {leads && leads.length>0 && filter==="high" && leads.filter(l=>l.relevance==="high").length===0 && (
         <div className="card" style={{padding:22,textAlign:"center"}}>
@@ -2622,6 +2655,26 @@ function Discovery({onImported}){
           ))}
         </div>
       )}
+
+      <details className="disclose">
+        <summary>How Discovery works, and test the filter</summary>
+        <p style={{fontSize:12.5,color:"var(--slate)",margin:"6px 0 14px"}}>21 sources: SAM.gov federal API, Missouri FMDC + MissouriBUYS, Kansas state, Jackson/Johnson/Wyandotte counties, 16th Circuit, KCMO + Independence, Lee's Summit, Overland Park, Olathe, and Lenexa city halls, 4 school districts, KCI, KU Med, and KU. Graded for YOUR scope: "Film & tinting" means the posting actually names film or tinting work — those are your jobs. "Glazing upsell" is window and glass work where film can be pitched as an add-on. Blinds, shades, window cleaning, auto glass, and unrelated trades are filtered out automatically. Nothing bypasses logins or terms of service.</p>
+        {sources && (
+          <div className="card" style={{padding:14,marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:700,letterSpacing:".07em",textTransform:"uppercase",color:"var(--slate)",marginBottom:8}}>Source status — last scan</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:"6px 14px"}}>
+              {sources.map(s=>(
+                <div key={s.id} style={{display:"flex",alignItems:"center",gap:7,fontSize:12.5}} title={s.error||""}>
+                  <span style={{width:8,height:8,borderRadius:99,flexShrink:0,background:s.status==="ok"?"var(--good)":s.status==="skipped"?"#9AA7B8":s.status==="js-portal"?"var(--warn)":"var(--bad)"}}/>
+                  <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name}</span>
+                  <span className="mono" style={{marginLeft:"auto",color:"var(--slate)"}}>{s.status==="ok"?s.found:s.status==="js-portal"?"JS":s.status==="skipped"?"–":"err"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <LeadTester/>
+      </details>
     </div>
   );
 }
@@ -3050,12 +3103,26 @@ export default function TintIntelligenceAI(){
   const [openId,setOpenId] = useState(null);
   const [adding,setAdding] = useState(false);
   const [loadErr,setLoadErr] = useState("");
+  const [badges,setBadges] = useState({leads:0, followups:0});
   const timers = useRef({});
 
   const debouncedPut = (key, path, body) => {
     clearTimeout(timers.current[key]);
     timers.current[key] = setTimeout(()=>api(path,{method:"PUT",body}).catch(e=>console.error("save failed:",e.message)), 500);
   };
+
+  // Sidebar badge counts — best-effort only, never blocks the app if they fail.
+  const refreshBadges = ()=>{
+    api("/discovery/leads").then(r=>{
+      const n = (Array.isArray(r)?r:[]).filter(l=>l.relevance==="high").length;
+      setBadges(b=>({...b, leads:n}));
+    }).catch(()=>{});
+    api2("/followups").then(g=>{
+      const n = (g?.overdue?.length||0) + (g?.today?.length||0);
+      setBadges(b=>({...b, followups:n}));
+    }).catch(()=>{});
+  };
+  useEffect(()=>{ refreshBadges(); },[]);
 
   useEffect(()=>{(async()=>{
     try{
@@ -3107,17 +3174,27 @@ export default function TintIntelligenceAI(){
   });
 
   const NAV = [
-    ["dash","Dashboard",LayoutDashboard],
-    ["discovery","Discovery",Rss],
-    ["opps","Opportunities",Radar],
-    ["early","Early Leads",Radar],
-    ["followups","Follow-ups",Clock],
-    ["spec","Spec Hunter",Sparkles],
-    ["market","Market",Globe],
-    ["search","Search",FileSearch],
-    ["copilot","Blueprint Copilot",Sparkles],
-    ["gcs","Contractors",Building2],
-    ["health","System Health",RefreshCw],
+    ["Find work", [
+      ["dash","Dashboard",LayoutDashboard],
+      ["discovery","Discovery",Rss,badges.leads],
+      ["early","Early Leads",Radar],
+    ]],
+    ["Pipeline", [
+      ["opps","Opportunities",Radar],
+      ["followups","Follow-ups",Clock,badges.followups],
+    ]],
+    ["Win more", [
+      ["spec","Spec Hunter",Sparkles],
+      ["market","Market",Globe],
+      ["search","Search",FileSearch],
+    ]],
+    ["Tools", [
+      ["copilot","Blueprint Copilot",Sparkles],
+    ]],
+    ["Admin", [
+      ["gcs","Contractors",Building2],
+      ["health","System Health",RefreshCw],
+    ]],
   ];
 
   return (
@@ -3125,21 +3202,30 @@ export default function TintIntelligenceAI(){
       <style>{CSS+"@keyframes spin{to{transform:rotate(360deg)}}"}</style>
       <aside className="side">
         <div className="brand">
-          <span>Tint Tech KC</span>
-          <b>Tint Intelligence AI</b>
+          <div className="mark"><Rss size={17} color="#fff"/></div>
+          <div>
+            <span>Tint Tech KC</span>
+            <b>Tint Intelligence AI</b>
+          </div>
         </div>
         <nav className="nav" aria-label="Main">
-          {NAV.map(([k,l,I])=>(
-            <button key={k} className={view===k?"on":""} onClick={()=>{setView(k);setAdding(false);}}>
-              <I size={17}/><span>{l}</span>
-            </button>
+          {NAV.map(([group,items])=>(
+            <div className="navgroup" key={group}>
+              <div className="lbl2">{group}</div>
+              {items.map(([k,l,I,badge])=>(
+                <button key={k} className={view===k?"on":""} onClick={()=>{setView(k);setAdding(false);refreshBadges();}}>
+                  <I size={17}/><span>{l}</span>
+                  {!!badge && <span className="navbadge">{badge>99?"99+":badge}</span>}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
         <div className="foot">Construction Intelligence OS<br/>Module 1 · KC Metro</div>
       </aside>
       <main className="main">
-        {view==="dash" && <Dashboard opps={opps} setView={()=>{setView("opps");setAdding(true);}} openOpp={openOpp}/>}
-        {view==="discovery" && <Discovery onImported={opp=>{setOpps(p=>[opp,...p]);}}/>}
+        {view==="dash" && <Dashboard opps={opps} setView={()=>{setView("opps");setAdding(true);}} openOpp={openOpp} goDiscovery={()=>setView("discovery")} pendingLeads={badges.leads}/>}
+        {view==="discovery" && <Discovery onImported={opp=>{setOpps(p=>[opp,...p]);refreshBadges();}}/>}
         {view==="opps" && <Opportunities opps={opps} addOpp={addOpp} openOpp={openOpp} adding={adding} setAdding={setAdding}/>}
         {view==="copilot" && <Copilot/>}
         {view==="followups" && <FollowUps openOpp={openOpp}/>}
