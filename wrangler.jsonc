@@ -1,0 +1,34 @@
+{
+  "name": "tint-intelligence-ai",
+  "main": "src/worker.js",
+  "compatibility_date": "2025-09-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tint-intelligence",
+      "database_id": "PASTE_YOUR_D1_ID_HERE"
+    }
+  ],
+  "migrations_dir": "migrations",
+  "r2_buckets": [
+    {
+      "binding": "DOCUMENTS",
+      "bucket_name": "tint-documents"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "BLUEPRINTS",
+      "id": "PASTE_YOUR_KV_ID_HERE"
+    }
+  ],
+  "triggers": {
+    "crons": ["30 11 * * *"]
+  },
+  "observability": { "enabled": true }
+}

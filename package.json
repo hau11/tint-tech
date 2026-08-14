@@ -1,0 +1,28 @@
+{
+  "name": "tint-intelligence-ai",
+  "version": "1.0.0",
+  "description": "Commercial construction intelligence for window film contractors",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test tests/engines.test.js tests/analyze.test.js tests/addendum.test.js tests/relevance.test.js tests/documents.test.js tests/analytics.test.js tests/search.test.js tests/checklist.test.js tests/digest.test.js tests/early.test.js tests/hidden.test.js tests/pursuit.test.js tests/intel.test.js tests/market.test.js",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "build": "esbuild frontend/app.jsx --bundle --minify --jsx=automatic --outfile=public/app.js",
+    "migrate": "wrangler d1 migrations apply tint-intelligence --remote"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "postal-mime": "^2.7.6"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "lucide-react": "^1.30.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "wrangler": "^4.120.0"
+  }
+}
