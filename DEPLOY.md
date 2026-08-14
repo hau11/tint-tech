@@ -191,6 +191,48 @@ up correctly in Discovery, check the raw payload against the candidate field
 names at the top of `bluebookToLead()` in that file and widen the list to
 match.
 
+## L. BuildingConnected (Autodesk) leads
+
+Unlike Blue Book, BuildingConnected uses three-legged OAuth — a real person
+has to log into their Autodesk / BuildingConnected account once and grant
+access. There's no API key to paste in.
+
+1. Register an app at https://aps.autodesk.com (My Apps > Create App).
+   - Callback URL: `https://YOUR-APP-URL/api/integrations/buildingconnected/callback`
+   - Request the `data:read` scope, and access to the BuildingConnected API
+     product (Autodesk may require your app/account to be approved for BC
+     access — ask their sales/partner team if the product isn't selectable).
+2. Copy the Client ID and Client Secret it gives you, then:
+
+       npx wrangler secret put BC_CLIENT_ID
+       npx wrangler secret put BC_CLIENT_SECRET
+
+   (APP_URL must also be set — see step J above; it's reused here to build
+   the OAuth callback URL.)
+3. Deploy:  npx wrangler deploy
+4. Open System Health in the app and click **Connect BuildingConnected**. Log
+   into Autodesk when prompted, approve access, and you'll land back in the
+   app connected. Click **Sync now** any time to pull current projects into
+   Discovery, graded by the same film/glazing relevance engine as every other
+   source.
+
+**Caveat — read before relying on this:** the only part of Autodesk's
+BuildingConnected API docs this was built against is a single screenshot
+confirming the auth model (three-legged OAuth, `data:read` scope, Bearer
+token). The exact request URL past `developer.api.autodesk.com/...` and the
+project response's field names were **not** visible in that screenshot, so
+`src/buildingconnected.js` uses a placeholder URL
+(`DEFAULT_PROJECTS_URL`, overridable via a `BC_PROJECTS_URL` secret without a
+code change) and a defensive field-name guesser
+(`bcProjectToLead()`). The OAuth connect/token/refresh flow itself is real
+and uses Autodesk's stable, documented v2 auth endpoints — that part should
+just work. If Sync now runs but leads come through titled "Untitled
+BuildingConnected project" or blank, the response field names need
+correcting: open the full "Method and URI" and "Response" sections of
+https://aps.autodesk.com/en/docs/buildingconnected/v2/reference/http/buildingconnected-projects-GET/
+and update `DEFAULT_PROJECTS_URL` and the `pick(p, [...])` candidate lists in
+`bcProjectToLead()` to match.
+
 ---
 
 ## Pursuit phase — one extra migration

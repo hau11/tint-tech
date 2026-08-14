@@ -43,7 +43,7 @@ body{margin:0}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 2px rgba(12,35,64,.04)}
 .card.hoverable{cursor:pointer;transition:box-shadow .15s,border-color .15s,transform .15s}
 .card.hoverable:hover{box-shadow:0 6px 20px rgba(12,35,64,.09);border-color:#c8d7ea;transform:translateY(-1px)}
-.btn{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:9px;padding:10px 15px;font:600 13.5px 'Inter';cursor:pointer;transition:filter .15s,box-shadow .15s}
+.btn{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:9px;padding:10px 15px;font:600 13.5px 'Inter';cursor:pointer;transition:filter .15s,box-shadow .15s;text-decoration:none}
 .btn:hover{filter:brightness(1.06)}
 .btn.pri{background:var(--azure);color:#fff;box-shadow:0 2px 8px rgba(30,130,230,.3)}
 .btn.dark{background:var(--navy);color:#fff}
@@ -2983,6 +2983,39 @@ function DigestPanel(){
 }
 
 /* ============ SYSTEM HEALTH (V2 Phase 6) ============ */
+function BuildingConnectedPanel({connected, onSynced}){
+  const [busy,setBusy] = useState(false);
+  const [msg,setMsg] = useState(null);
+  const sync = async ()=>{
+    setBusy(true); setMsg(null);
+    try{ const r = await api2("/integrations/buildingconnected/sync",{method:"POST"}); setMsg({ok:true,text:`${r.found} project(s) checked, ${r.added} new lead(s) added.`}); onSynced?.(); }
+    catch(e){ setMsg({ok:false,text:e.message}); }
+    setBusy(false);
+  };
+  return (
+    <div className="card" style={{padding:18,marginBottom:14}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:8}}>
+        <h3 style={{margin:0,fontSize:15}}>BuildingConnected</h3>
+        <span className="tag" style={{background:connected?"#E7F5EE":"#FDF3E4",color:connected?"var(--good)":"var(--warn)"}}>
+          {connected?"connected":"not connected"}
+        </span>
+      </div>
+      <p style={{fontSize:12.5,color:"var(--slate)",margin:"0 0 12px"}}>
+        {connected
+          ? "Pull the bid invitations on your BuildingConnected account into Discovery."
+          : "Connect your Autodesk / BuildingConnected account once — a real login, not an API key — to pull your bid invitations into Discovery."}
+      </p>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        {!connected && <a className="btn pri" href="/api/integrations/buildingconnected/connect"><Globe size={15}/>Connect BuildingConnected</a>}
+        {connected && <button className="btn pri" disabled={busy} onClick={sync}>
+          {busy?<Loader2 size={15} style={{animation:"spin 1s linear infinite"}}/>:<RefreshCw size={15}/>}Sync now
+        </button>}
+      </div>
+      {msg && <p style={{fontSize:12.5,marginTop:10,color:msg.ok?"var(--good)":"var(--bad)"}}>{msg.text}</p>}
+    </div>
+  );
+}
+
 function SystemHealth(){
   const [h,setH] = useState(null);
   const [err,setErr] = useState("");
@@ -3026,6 +3059,7 @@ function SystemHealth(){
               </div>
             ))}
           </div>
+          <BuildingConnectedPanel connected={h.items.find(i=>i.name==="BuildingConnected")?.status==="Healthy"} onSynced={load}/>
           <DigestPanel/>
           <div className="card" style={{padding:18}}>
             <h3 style={{margin:"0 0 10px",fontSize:15}}>Export your data</h3>

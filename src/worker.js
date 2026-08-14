@@ -6,6 +6,7 @@ import { makeStore, uid } from "./store.js";
 import { scoreOpportunity, blueprintChat, generateProposal } from "./claude.js";
 import { runDiscovery, leadToOpportunity } from "./discovery.js";
 import { bluebookToLead } from "./bluebook.js";
+import { buildAuthorizeUrl, exchangeCode, ensureAccessToken, fetchProjectLeads } from "./buildingconnected.js";
 import { makeDb, migrateKvToV2 } from "./db.js";
 import { findDocumentLinks, analyzableDocuments, describeDocumentSet } from "./documents.js";
 import {
@@ -333,6 +334,32 @@ export default {
         }
         await store.set("discovered", discovered.filter(l => l.id !== m[1]));
         return json({ ok: true });
+      }
+
+      /* ---- BuildingConnected (Autodesk) — three-legged OAuth, see src/buildingconnected.js ---- */
+      if (path === "/api/integrations/buildingconnected/connect" && request.method === "GET") {
+        if (!env.BC_CLIENT_ID) return json({ error: "BC_CLIENT_ID is not set — see DEPLOY.md step L." }, 400);
+        return Response.redirect(buildAuthorizeUrl(env), 302);
+      }
+      if (path === "/api/integrations/buildingconnected/callback" && request.method === "GET") {
+        const oauthErr = url.searchParams.get("error");
+        if (oauthErr) return json({ error: "Autodesk declined: " + oauthErr }, 400);
+        const code = url.searchParams.get("code");
+        if (!code) return json({ error: "Missing authorization code" }, 400);
+        const tok = await exchangeCode(env, code);
+        await store.set("bc_tokens", tok);
+        return Response.redirect((env.APP_URL || "/") + "#health", 302);
+      }
+      if (path === "/api/integrations/buildingconnected/sync" && request.method === "POST") {
+        const token = await ensureAccessToken(env, store);
+        if (!token) return json({ error: "Not connected yet — tap Connect BuildingConnected first." }, 400);
+        const leads = await fetchProjectLeads(env, token);
+        let added = 0;
+        for (const lead of leads) { if (await saveLead(store, lead)) added++; }
+        const meta = (await store.get("meta")) || {};
+        meta.bcLastSync = new Date().toISOString();
+        await store.set("meta", meta);
+        return json({ ok: true, found: leads.length, added });
       }
 
       /* ================= V2 ROUTES ================= */
@@ -1290,6 +1317,8 @@ export default {
             samLastRun: meta.samLastRun || null,
             lastDiscovery: discovered[0]?.foundAt || null,
             bluebookLastReceived: meta.bluebookLastReceived || null,
+            bcConnected: Boolean(await store.get("bc_tokens")),
+            bcLastSync: meta.bcLastSync || null,
             passwordSet: Boolean(env.APP_PASSWORD),
             cron: true,
             digest: Boolean(env.RESEND_API_KEY && env.DIGEST_TO),

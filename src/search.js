@@ -98,6 +98,10 @@ export function summarizeHealth(checks = {}) {
     checks.bluebookLastReceived
       ? `Last notification received ${checks.bluebookLastReceived.slice(0, 10)}`
       : "Register /api/ingest/bluebook?token=YOUR_APP_PASSWORD as the webhook callback in Blue Book (see DEPLOY.md).");
+  add("BuildingConnected", checks.bcConnected ? "Healthy" : "Not configured",
+    checks.bcConnected
+      ? `Connected${checks.bcLastSync ? ` · last synced ${checks.bcLastSync.slice(0, 10)}` : " — tap Sync now"}`
+      : "Set BC_CLIENT_ID/BC_CLIENT_SECRET, then tap Connect BuildingConnected (see DEPLOY.md step L).");
   add("Login protection", checks.passwordSet ? "Healthy" : "Warning",
     checks.passwordSet ? "Password required" : "APP_PASSWORD is not set — anyone with the URL can open this app.");
   add("Morning email digest", checks.digest ? "Healthy" : "Not configured",
