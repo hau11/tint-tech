@@ -85,7 +85,7 @@ function buildSubject({ newLeads, dueToday, dueSoon, preBids }) {
   if (newLeads.length) bits.push(`${newLeads.length} new lead${newLeads.length === 1 ? "" : "s"}`);
   if (dueSoon.length) bits.push(`${dueSoon.length} due this week`);
   if (preBids.length) bits.push(`${preBids.length} pre-bid`);
-  return bits.length ? `Tint Intelligence: ${bits.join(", ")}` : "Tint Intelligence: nothing needs you today";
+  return bits.length ? `Bid Hunter: ${bits.join(", ")}` : "Bid Hunter: nothing needs you today";
 }
 
 /* ============================================================
@@ -93,7 +93,7 @@ function buildSubject({ newLeads, dueToday, dueSoon, preBids }) {
    ============================================================ */
 export function renderDigestText(d, appUrl = "") {
   const L = [];
-  L.push(`TINT INTELLIGENCE — ${d.date}`);
+  L.push(`BID HUNTER — ${d.date}`);
   L.push("");
   if (!d.hasContent) {
     L.push("No new leads and no deadlines in the next 7 days.");
@@ -202,7 +202,7 @@ export function renderDigestHtml(d, appUrl = "") {
   }
   if (appUrl) {
     P.push(`<div style="text-align:center;padding:6px 0 18px">
-      <a href="${esc(appUrl)}" style="display:inline-block;background:#1E82E6;color:#fff;text-decoration:none;font-weight:600;font-size:14px;padding:11px 20px;border-radius:9px">Open Tint Intelligence</a></div>`);
+      <a href="${esc(appUrl)}" style="display:inline-block;background:#1E82E6;color:#fff;text-decoration:none;font-weight:600;font-size:14px;padding:11px 20px;border-radius:9px">Open Bid Hunter</a></div>`);
   }
   if (d.scanSummary) P.push(`<div style="${S.meta};text-align:center;padding-bottom:16px">${esc(d.scanSummary)}</div>`);
   P.push(`</div></div>`);
@@ -216,7 +216,7 @@ export async function sendEmail(env, { to, subject, html, text }) {
   const key = env.RESEND_API_KEY;
   if (!key) return { sent: false, reason: "No RESEND_API_KEY configured — digest generated but not emailed." };
   if (!to) return { sent: false, reason: "No DIGEST_TO address configured." };
-  const from = env.DIGEST_FROM || "Tint Intelligence <onboarding@resend.dev>";
+  const from = env.DIGEST_FROM || "Bid Hunter <onboarding@resend.dev>";
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },

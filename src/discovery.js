@@ -278,9 +278,9 @@ export function leadToOpportunity(lead) {
   return {
     id: uid(),
     name: `${lead.projectNo && lead.projectNo !== "-" ? lead.projectNo + " — " : ""}${lead.title}`.slice(0, 150),
-    owner: lead.source, architect: "", gc: "",
+    owner: lead.owner || lead.source, architect: "", gc: lead.gc || "",
     bidNumber: lead.projectNo === "-" ? "" : lead.projectNo,
-    bidDue, preBid: "", city: "", county: "", state: lead.state || "", value: "",
+    bidDue, preBid: "", city: lead.city || "", county: "", state: lead.state || "", value: "",
     type: "Public",
     source: lead.links?.page || lead.links?.ifb || lead.sourceUrl,
     discovered: lead.foundAt, status: "New", filmTypes: [],

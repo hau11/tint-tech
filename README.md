@@ -1,4 +1,4 @@
-# Tint Intelligence AI — Cloudflare edition
+# Bid Hunter — Cloudflare edition
 
 Same app, rebuilt native for Cloudflare Workers: $0/month hosting, always-on,
 nightly discovery scans via Cron Triggers, D1 database, KV blueprint storage,
@@ -267,7 +267,7 @@ brief covering:
   the source posting and showing why it matched
 - **Highest scoring open work** (70+)
 
-Subject lines summarise the day: "Tint Intelligence: 1 due TODAY, 2 new leads".
+Subject lines summarise the day: "Bid Hunter: 1 due TODAY, 2 new leads".
 On a quiet day it says so plainly rather than padding.
 
 ## Email is optional

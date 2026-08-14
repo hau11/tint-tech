@@ -161,11 +161,35 @@ domain and follow their DNS steps (Cloudflare makes this quick since your DNS is
 already there). Then set one more secret:
 
        npx wrangler secret put DIGEST_FROM
-       (type: Tint Intelligence <alerts@tinttechkc.com>)
+       (type: Bid Hunter <alerts@tinttechkc.com>)
 
 Until you do that, the brief sends from Resend's shared test address, which
 works fine but is more likely to land in spam. Check your junk folder on the
 first send and mark it "not junk".
+
+## K. Blue Book webhook leads
+
+Blue Book (webapi.bluebook.net) can push new-project notifications straight
+into Discovery, the same way the email ingest in step F does.
+
+1. In Blue Book, register this as your webhook callback URL:
+
+       https://YOUR-APP-URL/api/ingest/bluebook?token=YOUR_APP_PASSWORD
+
+   (same shared-secret pattern as the email ingest endpoint — no separate key
+   to generate.)
+2. That's it — no deploy needed, the route already exists. System Health shows
+   "Blue Book webhook" as Healthy once the first notification arrives, with
+   the date of the last one received.
+
+**Caveat:** Blue Book's exact notification payload wasn't available while
+this was built (their API docs domain isn't reachable from the build
+environment), so `src/bluebook.js` maps a defensive best-guess set of field
+names (`title`/`Title`/`projectName`/..., `dueDate`/`DueDate`/`closeDate`/...,
+etc.) rather than one confirmed schema. If a real notification doesn't show
+up correctly in Discovery, check the raw payload against the candidate field
+names at the top of `bluebookToLead()` in that file and widen the list to
+match.
 
 ---
 

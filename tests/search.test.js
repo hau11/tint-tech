@@ -47,7 +47,8 @@ test("search results carry a readable title and subtitle", () => {
 /* ---------- system health ---------- */
 test("a fully configured system reports healthy", () => {
   const h = summarizeHealth({ database: true, projectCount: 12, r2: true, claudeKey: true,
-    samKey: true, samLastRun: "2026-08-12T06:00:00Z", lastDiscovery: "2026-08-12", passwordSet: true,
+    samKey: true, samLastRun: "2026-08-12T06:00:00Z", lastDiscovery: "2026-08-12",
+    bluebookLastReceived: "2026-08-12T06:00:00Z", passwordSet: true,
     cron: true, digest: true, digestTo: "info@tinttechkc.com" });
   assert.equal(h.overall, "Healthy");
   assert.equal(h.healthy, h.total);

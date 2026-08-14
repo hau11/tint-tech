@@ -94,6 +94,10 @@ export function summarizeHealth(checks = {}) {
                   : "Run: npx wrangler secret put SAM_API_KEY");
   add("Discovery scan", checks.lastDiscovery ? "Healthy" : "Warning",
     checks.lastDiscovery ? `Last run ${checks.lastDiscovery}` : "No scan recorded yet — tap Scan now on Discovery.");
+  add("Blue Book webhook", checks.bluebookLastReceived ? "Healthy" : "Not configured",
+    checks.bluebookLastReceived
+      ? `Last notification received ${checks.bluebookLastReceived.slice(0, 10)}`
+      : "Register /api/ingest/bluebook?token=YOUR_APP_PASSWORD as the webhook callback in Blue Book (see DEPLOY.md).");
   add("Login protection", checks.passwordSet ? "Healthy" : "Warning",
     checks.passwordSet ? "Password required" : "APP_PASSWORD is not set — anyone with the URL can open this app.");
   add("Morning email digest", checks.digest ? "Healthy" : "Not configured",

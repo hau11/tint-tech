@@ -277,7 +277,7 @@ function Dashboard({opps, setView, openOpp, goDiscovery, pendingLeads}){
       <div className="pagehead">
         <div>
           <h1>{greeting()}</h1>
-          <p>Tint Intelligence — {new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"})}</p>
+          <p>Bid Hunter — {new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"})}</p>
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
           <Notifications openOpp={openOpp}/>
@@ -3094,7 +3094,7 @@ function Contractors({gcs,setGcs}){
 }
 
 /* ============ APP SHELL ============ */
-export default function TintIntelligenceAI(){
+export default function BidHunter(){
   const [view,setView] = useState("dash");
   const [opps,setOpps] = useState(null);
   const [gcs,setGcs] = useState(null);
@@ -3205,7 +3205,7 @@ export default function TintIntelligenceAI(){
           <div className="mark"><Rss size={17} color="#fff"/></div>
           <div>
             <span>Tint Tech KC</span>
-            <b>Tint Intelligence AI</b>
+            <b>Bid Hunter</b>
           </div>
         </div>
         <nav className="nav" aria-label="Main">
@@ -3252,4 +3252,4 @@ export default function TintIntelligenceAI(){
 
 import { createRoot } from "react-dom/client";
 const rootEl = document.getElementById("root");
-if(rootEl) createRoot(rootEl).render(<TintIntelligenceAI/>);
+if(rootEl) createRoot(rootEl).render(<BidHunter/>);

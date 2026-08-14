@@ -1,10 +1,11 @@
-// Tint Intelligence AI — Cloudflare Worker
+// Bid Hunter — Cloudflare Worker
 // Handles: API routes, basic-auth, static frontend, nightly discovery cron,
 // and email ingest (BuildingConnected / PlanHub / GC portal ITB invitations).
 import PostalMime from "postal-mime";
 import { makeStore, uid } from "./store.js";
 import { scoreOpportunity, blueprintChat, generateProposal } from "./claude.js";
 import { runDiscovery, leadToOpportunity } from "./discovery.js";
+import { bluebookToLead } from "./bluebook.js";
 import { makeDb, migrateKvToV2 } from "./db.js";
 import { findDocumentLinks, analyzableDocuments, describeDocumentSet } from "./documents.js";
 import {
@@ -159,10 +160,27 @@ export default {
       return json({ ok: true, added, lead });
     }
 
+    // Blue Book webhook notifications land here — same shared-token pattern as
+    // the email ingest above: register https://YOUR-APP/api/ingest/bluebook?token=APP_PASSWORD
+    // as the callback URL in Blue Book. See src/bluebook.js for the payload-mapping caveat.
+    if (path === "/api/ingest/bluebook" && request.method === "POST") {
+      if (env.APP_PASSWORD && url.searchParams.get("token") !== env.APP_PASSWORD)
+        return json({ error: "Bad token" }, 401);
+      const body = await request.json().catch(() => ({}));
+      const lead = bluebookToLead(body);
+      const added = await saveLead(store, lead);
+      if (added) {
+        const meta = (await store.get("meta")) || {};
+        meta.bluebookLastReceived = new Date().toISOString();
+        await store.set("meta", meta);
+      }
+      return json({ ok: true, added, lead });
+    }
+
     if (!authorized(request, env)) {
       return new Response("Login required", {
         status: 401,
-        headers: { "WWW-Authenticate": 'Basic realm="Tint Intelligence AI"' }
+        headers: { "WWW-Authenticate": 'Basic realm="Bid Hunter"' }
       });
     }
 
@@ -1271,6 +1289,7 @@ export default {
             samKey: Boolean(env.SAM_API_KEY),
             samLastRun: meta.samLastRun || null,
             lastDiscovery: discovered[0]?.foundAt || null,
+            bluebookLastReceived: meta.bluebookLastReceived || null,
             passwordSet: Boolean(env.APP_PASSWORD),
             cron: true,
             digest: Boolean(env.RESEND_API_KEY && env.DIGEST_TO),

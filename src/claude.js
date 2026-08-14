@@ -48,7 +48,7 @@ ${JSON.stringify({ ...opp, today: new Date().toISOString().slice(0, 10) })}`;
   return { total: Math.round(j.total), breakdown: j.breakdown || {}, reasoning: j.reasoning || "", at: new Date().toISOString().slice(0, 10) };
 }
 
-const COPILOT_SYS = `You are the Blueprint Intelligence Copilot inside Tint Intelligence AI, used by ${COMPANY}
+const COPILOT_SYS = `You are the Blueprint Intelligence Copilot inside Bid Hunter, used by ${COMPANY}
 
 The user uploads construction documents (drawings, specs, project manuals, addenda). Your job:
 - Find and analyze all glazing: storefronts, curtain walls, window schedules, glass types, dimensions, and quantities.
@@ -186,7 +186,7 @@ Return JSON:
 
 /** Project Copilot — answers from indexed evidence, not the whole PDF. */
 export async function answerFromEvidence(env, { project, question, evidence, filmScope, glazing, history = [] }) {
-  const system = `You are the Project AI Copilot inside Tint Intelligence, used by Tint Tech KC (commercial window film, Kansas City metro). You answer questions about a specific construction project using ONLY the evidence supplied.
+  const system = `You are the Project AI Copilot inside Bid Hunter, used by Tint Tech KC (commercial window film, Kansas City metro). You answer questions about a specific construction project using ONLY the evidence supplied.
 
 ${NEVER_INVENT.replace("Respond ONLY with raw JSON. No markdown fences, no preamble.", "")}
 
