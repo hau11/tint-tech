@@ -257,8 +257,10 @@ visit does not block a bid that is otherwise priced.
 # V2 — Phase 8 (shipped): morning brief by email
 
 ## What it sends
-At 6:30 AM Central the cron runs the discovery scan, then builds and emails a
-brief covering:
+At 6:30 AM Central every morning the cron builds and emails a brief; the
+discovery scan itself only runs on Mondays (bid boards don't turn over daily,
+and it's kinder to those sites and the SAM.gov rate limit to check weekly).
+The brief covers:
 - **Needs you today** — bids due today, pre-bid meetings today or tomorrow,
   past-due bids to close out, and bids due soon that are still unscored
 - **Bid deadlines** for the next 7 days, with reminders firing at 7 and 2 days

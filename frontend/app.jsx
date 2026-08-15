@@ -2559,7 +2559,7 @@ function Discovery({onImported}){
   return (
     <div>
       <div className="pagehead">
-        <div><h1>Discovery Engine</h1><p>Scans public procurement sources for projects that may need film — runs automatically every morning at 6:30</p></div>
+        <div><h1>Discovery Engine</h1><p>Scans public procurement sources for projects that may need film — runs automatically every Monday morning at 6:30</p></div>
         <button className="btn pri" disabled={scanning} onClick={scan}>
           {scanning? <Loader2 size={15} style={{animation:"spin 1s linear infinite"}}/> : <Rss size={15}/>}
           {scanning? "Scanning…" : "Scan now"}
@@ -2974,7 +2974,7 @@ function DigestPanel(){
               fontSize:11.5,lineHeight:1.6,whiteSpace:"pre-wrap",overflowWrap:"anywhere",maxHeight:340,overflowY:"auto"}}>{d.text}</pre>
           )}
           <p style={{fontSize:11.5,color:"var(--slate)",marginTop:10}}>
-            Sent automatically at 6:30 AM Central after the nightly scan, once RESEND_API_KEY and DIGEST_TO are set.
+            Sent automatically every morning at 6:30 AM Central (the discovery scan itself only runs Mondays), once RESEND_API_KEY and DIGEST_TO are set.
           </p>
         </>
       )}

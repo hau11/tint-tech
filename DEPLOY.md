@@ -32,8 +32,9 @@ https://tint-intelligence-ai.YOUR-SUBDOMAIN.workers.dev
 Open it on your phone — any username + your APP_PASSWORD. Then Safari > Share >
 Add to Home Screen to make it feel like an app.
 
-The nightly discovery scan runs automatically at 6:30 AM Central — no server to
-keep awake, that's Cloudflare's Cron doing it for free.
+The discovery scan runs automatically every Monday at 6:30 AM Central — no
+server to keep awake, that's Cloudflare's Cron doing it for free. (The morning
+digest email, if you set it up in step J, still sends every day.)
 
 ## E. Your own address (optional, 2 min)
 Cloudflare dashboard > Workers & Pages > tint-intelligence-ai > Settings >

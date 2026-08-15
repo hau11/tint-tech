@@ -1,5 +1,5 @@
 // Bid Hunter — Cloudflare Worker
-// Handles: API routes, basic-auth, static frontend, nightly discovery cron,
+// Handles: API routes, basic-auth, static frontend, weekly discovery cron,
 // and email ingest (BuildingConnected / PlanHub / GC portal ITB invitations).
 import PostalMime from "postal-mime";
 import { makeStore, uid } from "./store.js";
@@ -1944,22 +1944,32 @@ export default {
     }
   },
 
-  /* ================= Nightly discovery (Cron Trigger) ================= */
+  /* ================= Discovery + morning brief (Cron Trigger) ================= */
+  // The cron itself still fires every morning (the digest — deadlines, follow-ups,
+  // pre-bids — is genuinely daily-relevant), but the discovery *scan* only runs on
+  // Mondays: public bid boards don't turn over daily, and it's kinder to those
+  // sites and to the SAM.gov rate limit to check once a week instead of nightly.
   async scheduled(event, env, ctx) {
     const store = makeStore(env);
     const db = makeDb(env);
     ctx.waitUntil((async () => {
+      const isMonday = new Date(event.scheduledTime).getUTCDay() === 1;
       let scanSummary = null;
-      try {
-        const r = await runDiscovery(env, store);
-        const okCount = r.sources.filter(s => s.status === "ok").length;
-        scanSummary = `${okCount}/${r.sources.length} sources responded, ${r.new} new leads.`;
-        console.log("[discovery] nightly:", scanSummary);
-      } catch (e) {
-        scanSummary = "Discovery scan failed: " + e.message;
-        console.error("[discovery] nightly failed:", e.message);
+      if (isMonday) {
+        try {
+          const r = await runDiscovery(env, store);
+          const okCount = r.sources.filter(s => s.status === "ok").length;
+          scanSummary = `${okCount}/${r.sources.length} sources responded, ${r.new} new leads.`;
+          console.log("[discovery] weekly:", scanSummary);
+        } catch (e) {
+          scanSummary = "Discovery scan failed: " + e.message;
+          console.error("[discovery] weekly failed:", e.message);
+        }
+      } else {
+        console.log("[discovery] skipped — runs Mondays only");
       }
-      // Morning brief right after the scan, so it includes what was just found
+      // Morning brief every day regardless, so deadlines and follow-ups still
+      // surface daily even on days the scan didn't run.
       try {
         if (!env.RESEND_API_KEY || !env.DIGEST_TO) {
           console.log("[digest] skipped — RESEND_API_KEY / DIGEST_TO not configured");
