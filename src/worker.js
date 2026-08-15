@@ -7,6 +7,7 @@ import { scoreOpportunity, blueprintChat, generateProposal } from "./claude.js";
 import { runDiscovery, leadToOpportunity } from "./discovery.js";
 import { bluebookToLead } from "./bluebook.js";
 import { buildAuthorizeUrl, exchangeCode, ensureAccessToken, fetchProjectLeads } from "./buildingconnected.js";
+import { integrationsStatus } from "./integrations/registry.js";
 import { makeDb, migrateKvToV2 } from "./db.js";
 import { findDocumentLinks, analyzableDocuments, describeDocumentSet } from "./documents.js";
 import {
@@ -1329,6 +1330,9 @@ export default {
             lastDigest: meta.lastDigestAt || null
           }));
         }
+
+        if (path === "/api/v2/integrations" && request.method === "GET")
+          return ok({ items: await integrationsStatus(env, store) });
 
         // CSV exports
         pm = path.match(/^\/api\/v2\/export\/(projects|takeoff|results)$/);

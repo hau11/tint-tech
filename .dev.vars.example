@@ -1,0 +1,32 @@
+# Bid Hunter — local dev secrets template.
+# Copy to .dev.vars (gitignored) and fill in real values for local `wrangler dev`.
+# In production these are set with `npx wrangler secret put <NAME>` — never committed,
+# never placed in frontend code. See DEPLOY.md for setup steps per secret.
+
+# ---- Core ----
+ANTHROPIC_API_KEY=
+APP_PASSWORD=
+APP_URL=
+
+# ---- SAM.gov (free key, self-serve at sam.gov) ----
+SAM_API_KEY=
+
+# ---- Morning digest email (Resend) ----
+RESEND_API_KEY=
+DIGEST_TO=
+DIGEST_FROM=
+
+# ---- BuildingConnected (Autodesk Platform Services, OAuth) ----
+BC_CLIENT_ID=
+BC_CLIENT_SECRET=
+# Override only if the confirmed projects endpoint URL ever changes:
+# BC_PROJECTS_URL=
+
+# ---- Not yet integrated — commercial/partnership required, see the
+# ---- Integrations page in-app for status. Placeholders for when real
+# ---- credentials and confirmed docs exist.
+DODGE_CLIENT_ID=
+DODGE_CLIENT_SECRET=
+CONSTRUCTCONNECT_API_KEY=
+CONSTRUCTCONNECT_API_SECRET=
+PLANHUB_API_KEY=

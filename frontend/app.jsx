@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Radar, FileSearch, Building2, Plus, X, Sparkles,
   Upload, Send, Calculator, FileText, Copy, Download, ChevronRight,
   Clock, MapPin, Phone, Mail, Globe, Trash2, RefreshCw, CheckCircle2, Rss,
-  AlertTriangle, Loader2, ArrowLeft, Pencil, Save
+  AlertTriangle, Loader2, ArrowLeft, Pencil, Save, Link2
 } from "lucide-react";
 
 /* ============ DESIGN TOKENS (Tint Tech KC brand) ============ */
@@ -3059,7 +3059,6 @@ function SystemHealth(){
               </div>
             ))}
           </div>
-          <BuildingConnectedPanel connected={h.items.find(i=>i.name==="BuildingConnected")?.status==="Healthy"} onSynced={load}/>
           <DigestPanel/>
           <div className="card" style={{padding:18}}>
             <h3 style={{margin:"0 0 10px",fontSize:15}}>Export your data</h3>
@@ -3073,6 +3072,65 @@ function SystemHealth(){
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/* ============ INTEGRATIONS (source registry) ============ */
+const REG_STATUS_COLOR = {
+  integrated: "var(--good)", docs_confirmed: "var(--good)", covered_indirectly: "var(--good)",
+  public_known: "var(--azure)", commercial_required: "var(--warn)", unverified: "#7A5FD0"
+};
+const REG_PHASE_LABEL = {1:"Phase 1 — priority sources",2:"Phase 2 — public data & government portals",3:"Phase 3 — platform APIs & indirect coverage"};
+
+function IntegrationsView(){
+  const [items,setItems] = useState(null);
+  const [err,setErr] = useState("");
+  const load = ()=>api2("/integrations").then(r=>setItems(r.items)).catch(e=>setErr(e.message));
+  useEffect(()=>{ load(); },[]);
+
+  const groups = items ? [1,2,3].map(p=>[p, items.filter(i=>i.phase===p)]) : [];
+
+  return (
+    <div>
+      <div className="pagehead">
+        <div><h1>Integrations</h1><p>Every construction data source assessed for Bid Hunter — what's live, what's a business decision, what's still unverified</p></div>
+        <button className="btn ghost" onClick={load}><RefreshCw size={15}/>Refresh</button>
+      </div>
+      {err && <p style={{color:"var(--bad)",fontSize:13}}>{err}</p>}
+      {!items && !err && <p style={{fontSize:13.5,color:"var(--slate)"}}>Loading…</p>}
+      {groups.map(([phase,rows])=>(
+        <div key={phase} style={{marginBottom:26}}>
+          <h2 style={{fontSize:14,margin:"0 0 12px",color:"var(--slate)",textTransform:"uppercase",letterSpacing:".05em",fontWeight:700}}>{REG_PHASE_LABEL[phase]}</h2>
+          {rows.map(s=>{
+            const c = REG_STATUS_COLOR[s.status];
+            return (
+              <div key={s.id} className="card" style={{padding:16,marginBottom:10}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:8}}>
+                  <b style={{fontSize:14.5}}>{s.name}</b>
+                  <span className="tag" style={{background:c+"1A",color:c}}>{s.statusLabel}</span>
+                  {s.live && (
+                    <span className="tag" style={{marginLeft:"auto",background:s.live.connected?"#E7F5EE":"#EDF2F9",color:s.live.connected?"var(--good)":"var(--slate)"}}>
+                      {s.live.detail}
+                    </span>
+                  )}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:"4px 18px",fontSize:12.5,marginBottom:8}}>
+                  <div><b style={{color:"var(--slate)",fontWeight:600}}>Auth: </b>{s.auth}</div>
+                  <div><b style={{color:"var(--slate)",fontWeight:600}}>Access: </b>{s.access}</div>
+                </div>
+                <p style={{fontSize:12.5,color:"var(--slate)",margin:0,borderTop:"1px solid var(--line)",paddingTop:8}}>{s.note}</p>
+                {s.id==="buildingconnected" && <div style={{marginTop:12}}><BuildingConnectedPanel connected={Boolean(s.live?.connected)} onSynced={load}/></div>}
+                {s.id==="bluebook" && !s.live?.connected && (
+                  <p className="mono" style={{fontSize:11.5,color:"var(--azure)",marginTop:10,overflowWrap:"anywhere"}}>
+                    Register as webhook callback: /api/ingest/bluebook?token=YOUR_APP_PASSWORD
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }
@@ -3227,6 +3285,7 @@ export default function BidHunter(){
     ]],
     ["Admin", [
       ["gcs","Contractors",Building2],
+      ["integrations","Integrations",Link2],
       ["health","System Health",RefreshCw],
     ]],
   ];
@@ -3268,6 +3327,7 @@ export default function BidHunter(){
         {view==="early" && <EarlyOpportunities onTracked={()=>api("/opportunities").then(setOpps).catch(()=>{})}/>}
         {view==="search" && <GlobalSearch openOpp={openOpp}/>}
         {view==="health" && <SystemHealth/>}
+        {view==="integrations" && <IntegrationsView/>}
         {view==="gcs" && <Contractors gcs={gcs} setGcs={updGcs}/>}
       </main>
       {current && (
