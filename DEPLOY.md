@@ -216,26 +216,30 @@ access. There's no API key to paste in.
    Discovery, graded by the same film/glazing relevance engine as every other
    source.
 
-**Status — confirmed vs. still-guessed:** built from Autodesk's docs page in
-stages as screenshots came in (the docs domain itself is blocked from this
-build environment). Confirmed for real: the auth model (three-legged OAuth,
-`data:read` scope, `Authorization: Bearer <token>` header), the OAuth
-authorize/token endpoints (Autodesk's stable v2 auth endpoints, unrelated to
-the BC-specific page), and the exact request URL —
-`GET https://developer.api.autodesk.com/construction/buildingconnected/v2/projects`.
-That URL is hardcoded correctly now (still overridable without a code change
-via a `BC_PROJECTS_URL` secret, in case it turns out to need query
-parameters).
+**Status:** built from Autodesk's docs page in stages as screenshots came in
+(the docs domain itself is blocked from this build environment, so nothing
+here was fetched directly). At this point the whole request/response cycle is
+confirmed against real examples from the docs — auth model (three-legged
+OAuth, `data:read` scope, `Authorization: Bearer <token>` header), the OAuth
+authorize/token endpoints, the exact request URL
+(`GET https://developer.api.autodesk.com/construction/buildingconnected/v2/projects`),
+the `filter[field]=value` query syntax (used to make Sync incremental —
+`filter[updatedAt]=<lastSync>..`), the `pagination.nextUrl` pagination shape,
+and the real field names on a project (`name`, `number`, `client`,
+`description`, `notes`, `value`, `location`, `architect`, `company`,
+`bidsDueAt`, `closedAt`, `isPublic`, etc.) — all wired up in
+`bcProjectToLead()`.
 
-**Still a guess:** the response body's field names — `bcProjectToLead()` in
-`src/buildingconnected.js` uses a defensive best-effort list (`name`/
-`projectName`/`title`, `bidDate`/`dueDate`/..., etc.) since the docs page's
-Response/schema section hasn't been seen yet. If Sync now runs but leads come
-through titled "Untitled BuildingConnected project" or with blank fields,
-scroll that docs page down to its Response section (or find a "Try it" panel
-with a sample response — that shows every real field name in one shot) and
-send it over, or update the `pick(p, [...])` candidate lists in
-`bcProjectToLead()` directly to match.
+Two things are still educated guesses rather than confirmed:
+1. **The project's web URL isn't in the API response** — the link Discovery
+   shows is constructed as `app.buildingconnected.com/projects/{id}`. If that
+   routing turns out wrong it'll just 404 in a browser; it doesn't affect the
+   lead data.
+2. **Which field is the general contractor.** The response has a `company`
+   object on each project, mapped here to `gc` — but the one sample response
+   we've seen tags that example company as a Subcontractor, which is an odd
+   fit for "who's running this project." If GC names come through wrong once
+   real data flows, that's the line to revisit in `bcProjectToLead()`.
 
 ---
 

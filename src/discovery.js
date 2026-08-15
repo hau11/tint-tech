@@ -278,10 +278,10 @@ export function leadToOpportunity(lead) {
   return {
     id: uid(),
     name: `${lead.projectNo && lead.projectNo !== "-" ? lead.projectNo + " — " : ""}${lead.title}`.slice(0, 150),
-    owner: lead.owner || lead.source, architect: "", gc: lead.gc || "",
+    owner: lead.owner || lead.source, architect: lead.architect || "", gc: lead.gc || "",
     bidNumber: lead.projectNo === "-" ? "" : lead.projectNo,
-    bidDue, preBid: "", city: lead.city || "", county: "", state: lead.state || "", value: "",
-    type: "Public",
+    bidDue, preBid: "", city: lead.city || "", county: "", state: lead.state || "", value: lead.value || "",
+    type: lead.projectType || "Public",
     source: lead.links?.page || lead.links?.ifb || lead.sourceUrl,
     discovered: lead.foundAt, status: "New", filmTypes: [],
     notes: `Auto-discovered from ${lead.source} (${lead.relevance} relevance). Verify scope and dates at the source link.`,

@@ -2,7 +2,8 @@
 //
 // Docs: https://aps.autodesk.com/en/docs/buildingconnected/v2/reference/http/buildingconnected-projects-GET/
 //
-// CONFIRMED from the docs page (screenshots, 2026-08-14) — this part is real:
+// CONFIRMED from the docs page (screenshots + a sample response, 2026-08-14)
+// — this whole integration is now built against real, seen field names:
 //   - Method and URI: GET https://developer.api.autodesk.com/construction/buildingconnected/v2/projects
 //   - Authentication Context: "User context required" — three-legged OAuth.
 //     BuildingConnected data is scoped to a real person's account, so this is
@@ -14,19 +15,29 @@
 //     covers the same endpoint and needs no extra Autodesk-side setup.)
 //   - Required OAuth Scopes: data:read
 //   - Request header: Authorization: Bearer <three-legged access token>
-//   - Data format: JSON
+//   - Query filters use `filter[field]=value` — e.g. `filter[updatedAt]=<ISO>..`
+//     for an open-ended range. Used below to make Sync incremental.
+//   - Pagination: response has `pagination.nextUrl`, a ready-to-fetch full URL.
+//   - Response envelope: `{ pagination: {...}, results: [ {project...}, ... ] }`.
+//     Each project carries (among others): id, name, number, client,
+//     description (HTML), notes (HTML), value, projectSize/Units, location
+//     {city, state, complete, coords, ...}, architect, company {name, ...},
+//     bidsDueAt, dueAt, closedAt, awarded, state, isPublic, marketSector.
 // The OAuth authorize/token endpoints below are Autodesk Platform Services'
 // stable, publicly documented v2 auth endpoints (shared across all APS
-// products) — those are implemented for real, independent of the one page.
+// products) — those are implemented for real, independent of the BC-specific
+// page.
 //
-// STILL NOT CONFIRMED (the docs domain is blocked from this build environment
-// beyond the screenshots we've been sent so far): any query parameters
-// (pagination? filters?) and the response body's field names. The field
-// candidates in bcProjectToLead() below are still a best-effort guess. See
-// DEPLOY.md step L for how to confirm and correct them once you can see the
-// "Query Parameters" and "Response" sections of that page (or a sample
-// request/response, if the page has a "Try it" panel — that's the fastest way
-// to get both at once).
+// Two things below are still educated guesses, not confirmed by the docs:
+//   1. The project's public web URL isn't in the response — `link` is
+//      constructed from `id` as `app.buildingconnected.com/projects/{id}`,
+//      BuildingConnected's known web app host. If that routing is wrong,
+//      it'll 404 in a browser but doesn't affect the lead data itself.
+//   2. `company` on a project is mapped to `gc` (general contractor) since
+//      that's the most useful reading for "who's running this project" —
+//      the one sample response we've seen doesn't make this unambiguous
+//      (its example company has businessType "Subcontractor", which is odd
+//      for a GC). If GC names come through wrong, this is the field to swap.
 import { classifyFilmRelevance } from "./relevance.js";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -92,14 +103,6 @@ export async function ensureAccessToken(env, store) {
   return merged.access_token;
 }
 
-const pick = (obj, keys) => {
-  for (const k of keys) {
-    const v = obj?.[k];
-    if (v !== undefined && v !== null && v !== "") return v;
-  }
-  return "";
-};
-
 function normalizeDate(v) {
   if (!v) return "";
   const d = new Date(v);
@@ -107,48 +110,68 @@ function normalizeDate(v) {
   return String(v);
 }
 
+const stripHtml = s => String(s || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
 /**
- * Map one BuildingConnected project object onto the same lead shape Discovery's
- * scanners produce (src/discovery.js), so BC leads get identical film/glazing
- * relevance grading and dedup as scanned and Blue Book leads.
- * Field names are best-effort placeholders — see file header.
+ * Map one BuildingConnected project object (the confirmed `results[]` shape)
+ * onto the same lead shape Discovery's scanners produce (src/discovery.js),
+ * so BC leads get identical film/glazing relevance grading and dedup as
+ * scanned and Blue Book leads. See file header for the two fields that are
+ * still educated guesses (project link, company->gc).
  */
 export function bcProjectToLead(raw) {
   const p = raw?.project || raw || {};
-  const title = pick(p, ["name", "projectName", "title"]) || "Untitled BuildingConnected project";
-  const description = pick(p, ["description", "scope", "notes", "scopeOfWork"]);
-  const projectNo = pick(p, ["projectNumber", "number", "projectId", "id"]) || "-";
-  const bidDate = normalizeDate(pick(p, ["bidDate", "dueDate", "bidsDueAt", "biddingClosesAt", "closeDate"]));
-  const link = pick(p, ["url", "webUrl", "link", "permalink"]);
-  const city = pick(p, ["city", "locationCity"]);
-  const state = pick(p, ["state", "locationState", "region"]);
-  const owner = pick(p, ["owner", "clientName", "client"]);
-  const gc = pick(p, ["generalContractor", "company", "companyName"]);
+  const title = p.name || "Untitled BuildingConnected project";
+  const description = stripHtml(p.description);
+  const notes = stripHtml(p.notes);
+  const projectNo = p.number != null ? String(p.number) : (p.id || "-");
+  const bidDate = normalizeDate(p.bidsDueAt || p.dueAt);
+  const link = p.id ? `https://app.buildingconnected.com/projects/${p.id}` : "";
+  const loc = p.location || {};
+  const city = loc.city || "";
+  const state = loc.state || "";
+  const owner = p.client || "";
+  const gc = p.company?.name || "";
+  const architect = p.architect || "";
+  const value = Number(p.value) || null;
 
-  const hay = [title, description, owner, gc].filter(Boolean).join(" ");
+  const hay = [title, description, notes, owner, gc, architect, p.marketSector].filter(Boolean).join(" ");
   const cls = classifyFilmRelevance(hay);
 
   return {
     id: uid(),
-    projectNo: String(projectNo),
+    projectNo,
     title: String(title).slice(0, 160),
     bidDate,
     links: link ? { page: link } : {},
     relevance: cls.relevance, relevanceScore: cls.score, matchReasons: cls.reasons, filmTypes: cls.filmTypes,
-    stillOpen: true,
-    state: state ? String(state) : "",
-    city: city ? String(city) : "",
-    owner: owner ? String(owner) : "",
-    gc: gc ? String(gc) : "",
+    stillOpen: !p.closedAt,
+    state, city, owner, gc, architect,
+    value: value || undefined,
+    projectType: p.isPublic === true ? "Public" : p.isPublic === false ? "Private" : "",
     source: "BuildingConnected",
     sourceUrl: link || "https://www.buildingconnected.com/",
     foundAt: new Date().toISOString().slice(0, 10)
   };
 }
 
-/** Fetch every project BuildingConnected returns and map each to a lead. Handles a few common pagination shapes defensively. */
-export async function fetchProjectLeads(env, accessToken) {
-  let next = env.BC_PROJECTS_URL || DEFAULT_PROJECTS_URL;
+export function buildProjectsUrl(baseUrl, { updatedSince } = {}) {
+  let url = baseUrl;
+  if (updatedSince) {
+    const sep = url.includes("?") ? "&" : "?";
+    url += `${sep}filter[updatedAt]=${encodeURIComponent(updatedSince)}..`;
+  }
+  return url;
+}
+
+/**
+ * Fetch every project BuildingConnected returns and map each to a lead.
+ * Pass `updatedSince` (an ISO timestamp, e.g. the last sync time) to only
+ * pull projects that changed since then via `filter[updatedAt]=<iso>..` —
+ * confirmed real query syntax — instead of re-fetching everything each sync.
+ */
+export async function fetchProjectLeads(env, accessToken, { updatedSince } = {}) {
+  let next = buildProjectsUrl(env.BC_PROJECTS_URL || DEFAULT_PROJECTS_URL, { updatedSince });
   const leads = [];
   let pages = 0;
   while (next && pages < 20) {
@@ -160,7 +183,7 @@ export async function fetchProjectLeads(env, accessToken) {
     const data = await res.json();
     const items = data.results || data.data || data.projects || (Array.isArray(data) ? data : []);
     for (const item of items) leads.push(bcProjectToLead(item));
-    next = data.nextUrl || data.next || data.pagination?.next || null;
+    next = data.pagination?.nextUrl || data.nextUrl || data.next || null;
     pages++;
   }
   return leads;

@@ -353,10 +353,13 @@ export default {
       if (path === "/api/integrations/buildingconnected/sync" && request.method === "POST") {
         const token = await ensureAccessToken(env, store);
         if (!token) return json({ error: "Not connected yet — tap Connect BuildingConnected first." }, 400);
-        const leads = await fetchProjectLeads(env, token);
+        const meta = (await store.get("meta")) || {};
+        // After the first sync, only ask BuildingConnected for what changed
+        // since last time (filter[updatedAt]=<iso>..) instead of refetching
+        // every project on the account each run.
+        const leads = await fetchProjectLeads(env, token, { updatedSince: meta.bcLastSync || null });
         let added = 0;
         for (const lead of leads) { if (await saveLead(store, lead)) added++; }
-        const meta = (await store.get("meta")) || {};
         meta.bcLastSync = new Date().toISOString();
         await store.set("meta", meta);
         return json({ ok: true, found: leads.length, added });
