@@ -267,20 +267,24 @@ export async function runDiscovery(env, store) {
 }
 
 /* ---------------- Lead -> Opportunity ---------------- */
+// Discovery leads carry dates as M/D/YYYY (or M/D/YY); the Opportunity form
+// expects YYYY-MM-DD (native <input type="date">).
+function toIsoDate(mdy) {
+  const parts = (mdy || "").split("/");
+  if (parts.length !== 3) return "";
+  let [mm, dd, yyyy] = parts;
+  if (yyyy.length === 2) yyyy = "20" + yyyy;
+  return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+}
+
 export function leadToOpportunity(lead) {
-  const parts = (lead.bidDate || "").split("/");
-  let bidDue = "";
-  if (parts.length === 3) {
-    let [mm, dd, yyyy] = parts;
-    if (yyyy.length === 2) yyyy = "20" + yyyy;
-    bidDue = `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
-  }
   return {
     id: uid(),
     name: `${lead.projectNo && lead.projectNo !== "-" ? lead.projectNo + " — " : ""}${lead.title}`.slice(0, 150),
     owner: lead.owner || lead.source, architect: lead.architect || "", gc: lead.gc || "",
     bidNumber: lead.projectNo === "-" ? "" : lead.projectNo,
-    bidDue, preBid: "", city: lead.city || "", county: "", state: lead.state || "", value: lead.value || "",
+    bidDue: toIsoDate(lead.bidDate), preBid: toIsoDate(lead.preBidDate),
+    city: lead.city || "", county: "", state: lead.state || "", value: lead.value || "",
     type: lead.projectType || "Public",
     source: lead.links?.page || lead.links?.ifb || lead.sourceUrl,
     discovered: lead.foundAt, status: "New", filmTypes: [],

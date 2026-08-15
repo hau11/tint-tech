@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { bcProjectToLead, buildAuthorizeUrl, buildProjectsUrl, redirectUri } from "../src/buildingconnected.js";
+import { leadToOpportunity } from "../src/discovery.js";
 
 // The confirmed example response from Autodesk's docs page for
 // GET /construction/buildingconnected/v2/projects, adapted with film-relevant
@@ -36,7 +37,8 @@ const SAMPLE_RESPONSE = {
         complete: "600 California St., 6th Floor, San Francisco, CA 94108"
       },
       architect: "Browning Day Mullins Dierdorf Architects",
-      marketSector: "Sports Stadium Construction"
+      marketSector: "Sports Stadium Construction",
+      jobWalkAt: "2015-03-31T07:00:00.000Z"
     }
   ]
 };
@@ -57,6 +59,17 @@ test("maps the real confirmed response shape to the standard lead shape", () => 
   assert.equal(lead.source, "BuildingConnected");
   // closedAt is set -> no longer an open bid
   assert.equal(lead.stillOpen, false);
+  assert.equal(lead.preBidDate, "3/31/2015");
+});
+
+test("jobWalkAt flows through leadToOpportunity as the pre-bid meeting date", () => {
+  const [lead] = SAMPLE_RESPONSE.results.map(bcProjectToLead);
+  const opp = leadToOpportunity(lead);
+  assert.equal(opp.preBid, "2015-03-31");
+  assert.equal(opp.bidDue, "2014-09-22");
+  assert.equal(opp.architect, "Browning Day Mullins Dierdorf Architects");
+  assert.equal(opp.value, 1000000);
+  assert.equal(opp.type, "Private");
 });
 
 test("strips HTML from description/notes before relevance classification", () => {

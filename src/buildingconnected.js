@@ -22,7 +22,8 @@
 //     Each project carries (among others): id, name, number, client,
 //     description (HTML), notes (HTML), value, projectSize/Units, location
 //     {city, state, complete, coords, ...}, architect, company {name, ...},
-//     bidsDueAt, dueAt, closedAt, awarded, state, isPublic, marketSector.
+//     bidsDueAt, dueAt, closedAt, awarded, state, isPublic, marketSector,
+//     jobWalkAt (mapped to the opportunity's pre-bid meeting date).
 // The OAuth authorize/token endpoints below are Autodesk Platform Services'
 // stable, publicly documented v2 auth endpoints (shared across all APS
 // products) — those are implemented for real, independent of the BC-specific
@@ -126,6 +127,7 @@ export function bcProjectToLead(raw) {
   const notes = stripHtml(p.notes);
   const projectNo = p.number != null ? String(p.number) : (p.id || "-");
   const bidDate = normalizeDate(p.bidsDueAt || p.dueAt);
+  const preBidDate = normalizeDate(p.jobWalkAt);
   const link = p.id ? `https://app.buildingconnected.com/projects/${p.id}` : "";
   const loc = p.location || {};
   const city = loc.city || "";
@@ -142,7 +144,7 @@ export function bcProjectToLead(raw) {
     id: uid(),
     projectNo,
     title: String(title).slice(0, 160),
-    bidDate,
+    bidDate, preBidDate,
     links: link ? { page: link } : {},
     relevance: cls.relevance, relevanceScore: cls.score, matchReasons: cls.reasons, filmTypes: cls.filmTypes,
     stillOpen: !p.closedAt,
