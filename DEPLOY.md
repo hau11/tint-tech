@@ -216,22 +216,26 @@ access. There's no API key to paste in.
    Discovery, graded by the same film/glazing relevance engine as every other
    source.
 
-**Caveat — read before relying on this:** the only part of Autodesk's
-BuildingConnected API docs this was built against is a single screenshot
-confirming the auth model (three-legged OAuth, `data:read` scope, Bearer
-token). The exact request URL past `developer.api.autodesk.com/...` and the
-project response's field names were **not** visible in that screenshot, so
-`src/buildingconnected.js` uses a placeholder URL
-(`DEFAULT_PROJECTS_URL`, overridable via a `BC_PROJECTS_URL` secret without a
-code change) and a defensive field-name guesser
-(`bcProjectToLead()`). The OAuth connect/token/refresh flow itself is real
-and uses Autodesk's stable, documented v2 auth endpoints — that part should
-just work. If Sync now runs but leads come through titled "Untitled
-BuildingConnected project" or blank, the response field names need
-correcting: open the full "Method and URI" and "Response" sections of
-https://aps.autodesk.com/en/docs/buildingconnected/v2/reference/http/buildingconnected-projects-GET/
-and update `DEFAULT_PROJECTS_URL` and the `pick(p, [...])` candidate lists in
-`bcProjectToLead()` to match.
+**Status — confirmed vs. still-guessed:** built from Autodesk's docs page in
+stages as screenshots came in (the docs domain itself is blocked from this
+build environment). Confirmed for real: the auth model (three-legged OAuth,
+`data:read` scope, `Authorization: Bearer <token>` header), the OAuth
+authorize/token endpoints (Autodesk's stable v2 auth endpoints, unrelated to
+the BC-specific page), and the exact request URL —
+`GET https://developer.api.autodesk.com/construction/buildingconnected/v2/projects`.
+That URL is hardcoded correctly now (still overridable without a code change
+via a `BC_PROJECTS_URL` secret, in case it turns out to need query
+parameters).
+
+**Still a guess:** the response body's field names — `bcProjectToLead()` in
+`src/buildingconnected.js` uses a defensive best-effort list (`name`/
+`projectName`/`title`, `bidDate`/`dueDate`/..., etc.) since the docs page's
+Response/schema section hasn't been seen yet. If Sync now runs but leads come
+through titled "Untitled BuildingConnected project" or with blank fields,
+scroll that docs page down to its Response section (or find a "Try it" panel
+with a sample response — that shows every real field name in one shot) and
+send it over, or update the `pick(p, [...])` candidate lists in
+`bcProjectToLead()` directly to match.
 
 ---
 

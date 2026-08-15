@@ -2,11 +2,16 @@
 //
 // Docs: https://aps.autodesk.com/en/docs/buildingconnected/v2/reference/http/buildingconnected-projects-GET/
 //
-// CONFIRMED from the docs page (screenshot, 2026-08-14) — this part is real:
+// CONFIRMED from the docs page (screenshots, 2026-08-14) — this part is real:
+//   - Method and URI: GET https://developer.api.autodesk.com/construction/buildingconnected/v2/projects
 //   - Authentication Context: "User context required" — three-legged OAuth.
 //     BuildingConnected data is scoped to a real person's account, so this is
 //     NOT a silent server-to-server integration: a human has to click Connect,
-//     log into Autodesk/BuildingConnected once, and grant access.
+//     log into Autodesk/BuildingConnected once, and grant access. (The docs
+//     also mention a Secure Service Account (SSA) flow — headless but still
+//     user-scoped, needs an Autodesk admin to provision a service account
+//     ahead of time. Not implemented here; Authorization Code flow below
+//     covers the same endpoint and needs no extra Autodesk-side setup.)
 //   - Required OAuth Scopes: data:read
 //   - Request header: Authorization: Bearer <three-legged access token>
 //   - Data format: JSON
@@ -14,12 +19,14 @@
 // stable, publicly documented v2 auth endpoints (shared across all APS
 // products) — those are implemented for real, independent of the one page.
 //
-// NOT CONFIRMED (the docs domain is blocked from this build environment past
-// that one screenshot): the exact request path after ".../aut...", any query
-// parameters, and the response body's field names. DEFAULT_PROJECTS_URL below
-// and the field candidates in bcProjectToLead() are best-effort placeholders.
-// See DEPLOY.md step L for how to confirm and correct them once you can see
-// the full "Method and URI" and "Response" sections of that page.
+// STILL NOT CONFIRMED (the docs domain is blocked from this build environment
+// beyond the screenshots we've been sent so far): any query parameters
+// (pagination? filters?) and the response body's field names. The field
+// candidates in bcProjectToLead() below are still a best-effort guess. See
+// DEPLOY.md step L for how to confirm and correct them once you can see the
+// "Query Parameters" and "Response" sections of that page (or a sample
+// request/response, if the page has a "Try it" panel — that's the fastest way
+// to get both at once).
 import { classifyFilmRelevance } from "./relevance.js";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -29,9 +36,7 @@ const AUTHORIZE_URL = AUTH_BASE + "/authorize";
 const TOKEN_URL = AUTH_BASE + "/token";
 const SCOPE = "data:read";
 
-// PLACEHOLDER — confirm the real path from the docs page's "Method and URI"
-// row (it was cut off after ".../aut..." in the screenshot we have) and
-// correct here, or override without a code change via env.BC_PROJECTS_URL.
+// CONFIRMED — see file header.
 const DEFAULT_PROJECTS_URL = "https://developer.api.autodesk.com/construction/buildingconnected/v2/projects";
 
 export function redirectUri(env) {
