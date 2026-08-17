@@ -17,6 +17,12 @@ import {
 import { scoreRecord, buildSearchResult, rankSearchResults, summarizeHealth, toCsv } from "./search.js";
 import { buildChecklist, CHECKLIST_ITEMS } from "./checklist.js";
 import { buildDigest, renderDigestText, renderDigestHtml, sendEmail } from "./digest.js";
+import * as auth from "./auth.js";
+// Aliased to leadFlow: `leads` is used as a local array name in the digest
+// routes and the cron, and shadowing it would put the module in a temporal
+// dead zone inside those blocks.
+import * as leadFlow from "./leads.js";
+import * as webhooks from "./webhooks.js";
 import { assessEarlyOpportunity, detectStage, isEarly } from "./early.js";
 import { classifyFilmRelevance } from "./relevance.js";
 import { detectHiddenTintScope, estimateHiddenPotential, rankHiddenOpportunities } from "./hidden.js";
@@ -144,6 +150,462 @@ async function v2Health(env) {
   }
 }
 
+/* ============================================================
+   Auth routes. Deliberately outside the session gate — a person
+   without a session has to be able to reach the login endpoint.
+   ============================================================ */
+async function handleAuthRoutes({ path, request, env, db }) {
+  const ip = request.headers.get("cf-connecting-ip") || "";
+  const userAgent = request.headers.get("user-agent") || "";
+
+  if (path === "/api/auth/login" && request.method === "POST") {
+    const body = await request.json().catch(() => ({}));
+    try {
+      const { token, user } = await auth.login(db, {
+        username: body.username, password: body.password, ip, userAgent
+      });
+      return new Response(JSON.stringify({ ok: true, user }), {
+        status: 200,
+        headers: { "content-type": "application/json", "set-cookie": auth.sessionCookie(token) }
+      });
+    } catch (e) {
+      // Same shape for every failure — never reveals whether the username exists.
+      return json({ error: e.message || "Incorrect username or password." }, 401);
+    }
+  }
+
+  if (path === "/api/auth/logout" && request.method === "POST") {
+    const token = auth.parseCookies(request)[auth.SESSION_COOKIE];
+    await auth.logout(db, token);
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json", "set-cookie": auth.clearedCookieHeader() }
+    });
+  }
+
+  if (path === "/api/auth/me" && request.method === "GET") {
+    const actor = await auth.identify(request, env, db);
+    if (!actor) return json({ error: "Not signed in" }, 401);
+    if (actor.kind === "legacy-admin")
+      return json({ user: { role: "admin", username: "operator", legacy: true } });
+
+    const user = await db.first("SELECT * FROM users WHERE id = ?", actor.userId);
+    if (!user) return json({ error: "Not signed in" }, 401);
+    const customer = user.customer_id
+      ? await db.first("SELECT id, company_name, billing_cycle, billing_model FROM customers WHERE id = ?", user.customer_id)
+      : null;
+    return json({ user: auth.publicUser(user), customer });
+  }
+
+  if (path === "/api/auth/change-password" && request.method === "POST") {
+    const actor = await auth.identify(request, env, db);
+    if (!actor || !actor.userId) return json({ error: "Not signed in" }, 401);
+    const body = await request.json().catch(() => ({}));
+    const user = await db.first("SELECT * FROM users WHERE id = ?", actor.userId);
+    if (!user) return json({ error: "Not signed in" }, 401);
+
+    if (!(await auth.verifyPassword(body.currentPassword || "", user.password_hash)))
+      return json({ error: "Your current password is incorrect." }, 400);
+    try {
+      await db.update("users", user.id, {
+        password_hash: await auth.hashPassword(body.newPassword || ""),
+        must_change_password: 0
+      });
+    } catch (e) {
+      return json({ error: e.message }, 400);
+    }
+    // Every other session for this user is revoked, so a stolen cookie dies
+    // the moment the real owner changes their password.
+    await db.run(
+      "UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND id != ?",
+      new Date().toISOString(), user.id, actor.sessionId || ""
+    );
+    return json({ ok: true });
+  }
+
+  return json({ error: "Not found" }, 404);
+}
+
+/* Admin-only customer & user management (mounted under /api/admin/). */
+async function handleAccountAdmin({ path, request, db }) {
+  if (path === "/api/admin/customers" && request.method === "GET")
+    return json(await db.all("SELECT * FROM customers ORDER BY company_name"));
+
+  if (path === "/api/admin/customers" && request.method === "POST") {
+    const body = await request.json().catch(() => ({}));
+    try {
+      const customer = await auth.createCustomer(db, body);
+      // Optionally create the first login alongside the company, since a
+      // customer with no user can't actually do anything.
+      let user = null;
+      if (body.username && body.password) {
+        user = auth.publicUser(await auth.createUser(db, {
+          username: body.username, password: body.password,
+          role: "contractor", customerId: customer.id,
+          email: body.email, fullName: body.contact_name,
+          mustChangePassword: true
+        }));
+      }
+      return json({ customer, user });
+    } catch (e) { return json({ error: e.message }, 400); }
+  }
+
+  let m = path.match(/^\/api\/admin\/customers\/([\w-]+)$/);
+  if (m && request.method === "PUT")
+    return json(await db.update("customers", m[1], await request.json()));
+  if (m && request.method === "GET") {
+    const customer = await db.first("SELECT * FROM customers WHERE id = ?", m[1]);
+    if (!customer) return json({ error: "Customer not found" }, 404);
+    const users = await db.all(
+      "SELECT id, username, email, full_name, role, is_active, last_login_at FROM users WHERE customer_id = ?", m[1]);
+    return json({ ...customer, users });
+  }
+
+  if (path === "/api/admin/users" && request.method === "POST") {
+    const body = await request.json().catch(() => ({}));
+    try {
+      return json(auth.publicUser(await auth.createUser(db, {
+        username: body.username, password: body.password,
+        role: body.role || "contractor", customerId: body.customerId || null,
+        email: body.email, fullName: body.fullName, mustChangePassword: true
+      })));
+    } catch (e) { return json({ error: e.message }, 400); }
+  }
+
+  m = path.match(/^\/api\/admin\/users\/([\w-]+)\/reset-password$/);
+  if (m && request.method === "POST") {
+    const body = await request.json().catch(() => ({}));
+    try {
+      await db.update("users", m[1], {
+        password_hash: await auth.hashPassword(body.password || ""),
+        must_change_password: 1, failed_attempts: 0, locked_until: null
+      });
+      // Force re-login everywhere with the old password.
+      await db.run("UPDATE sessions SET revoked_at = ? WHERE user_id = ?", new Date().toISOString(), m[1]);
+      return json({ ok: true });
+    } catch (e) { return json({ error: e.message }, 400); }
+  }
+
+  m = path.match(/^\/api\/admin\/users\/([\w-]+)$/);
+  if (m && request.method === "PUT")
+    return json(await db.update("users", m[1], await request.json()));
+
+  return null;
+}
+
+/* ============================================================
+   Portal routes — everything a signed-in contractor can reach.
+   EVERY query is scoped by actor.customerId, taken from the session and
+   never from the request. That is what prevents one contractor reading
+   another's leads by editing a URL (spec §52).
+   ============================================================ */
+async function handlePortalRoutes({ path, request, env, db, actor }) {
+  const customerId = actor.customerId;
+  if (!customerId) return json({ error: "No customer on this account" }, 403);
+
+  const ip = request.headers.get("cf-connecting-ip") || "";
+  const userAgent = request.headers.get("user-agent") || "";
+  const user = await db.first("SELECT username, full_name FROM users WHERE id = ?", actor.userId);
+  const actorLabel = user?.full_name || user?.username || "contractor";
+  const ctx = { userId: actor.userId, actorLabel, ip, userAgent };
+
+  /* ---- the lead board ---- */
+  if (path === "/api/portal/leads" && request.method === "GET") {
+    const status = new URL(request.url).searchParams.get("status");
+    let sql = `SELECT l.*, p.name AS project_name, p.city, p.state, p.bid_due,
+                      p.general_contractor, p.architect, p.project_type,
+                      p.estimated_glazing_square_feet, p.score_json
+               FROM leads l JOIN projects p ON p.id = l.project_id
+               WHERE l.customer_id = ?`;
+    const binds = [customerId];
+    if (status) { sql += " AND l.status = ?"; binds.push(status); }
+    sql += " ORDER BY (p.bid_due IS NULL), p.bid_due ASC, l.delivered_at DESC LIMIT 300";
+    const rows = await db.all(sql, ...binds);
+    return json(rows.map(r => ({ ...r, actions: leadFlow.allowedActions(r.status) })));
+  }
+
+  /* ---- counts for the portal header ---- */
+  if (path === "/api/portal/summary" && request.method === "GET") {
+    const rows = await db.all(
+      "SELECT status, COUNT(*) AS n, SUM(lead_price) AS value FROM leads WHERE customer_id = ? GROUP BY status",
+      customerId);
+    const byStatus = {};
+    for (const r of rows) byStatus[r.status] = { count: r.n, value: r.value || 0 };
+
+    // Running quarter-to-date charges, shown on every screen so a
+    // quarterly invoice is never a surprise (spec §54).
+    const now = new Date();
+    const qStart = new Date(Date.UTC(now.getUTCFullYear(), Math.floor(now.getUTCMonth() / 3) * 3, 1)).toISOString();
+    const qtd = await db.first(
+      `SELECT COUNT(*) AS n, COALESCE(SUM(lead_price),0) AS amount
+         FROM leads WHERE customer_id = ? AND billable_at IS NOT NULL AND billable_at >= ?`,
+      customerId, qStart);
+    return json({
+      byStatus,
+      quarterToDate: { since: qStart, billableLeads: qtd?.n || 0, amount: qtd?.amount || 0 }
+    });
+  }
+
+  /* ---- one lead, with the full project intelligence ---- */
+  let m = path.match(/^\/api\/portal\/leads\/([\w-]+)$/);
+  if (m && request.method === "GET") {
+    const lead = await db.first(
+      "SELECT * FROM leads WHERE id = ? AND customer_id = ?", m[1], customerId);
+    if (!lead) return json({ error: "Lead not found" }, 404);
+
+    const updated = await leadFlow.recordView(db, lead, ctx);
+    const [project, terms, customer] = await Promise.all([
+      db.getProject(lead.project_id),
+      leadFlow.activeTerms(db),
+      db.first("SELECT * FROM customers WHERE id = ?", customerId)
+    ]);
+
+    const releaseLeft = leadFlow.releaseWindowRemaining(updated, customer);
+
+    return json({
+      lead: updated,
+      project,
+      actions: leadFlow.allowedActions(updated.status),
+      // Non-null only while the lead can actually be handed back, so the
+      // UI never offers a release that the server would refuse.
+      release: releaseLeft === null ? null : {
+        hoursRemaining: +releaseLeft.toFixed(1),
+        reasons: leadFlow.RELEASE_REASONS
+      },
+      billingDisclosure: leadFlow.billingDisclosure(lead.billing_model, customer || {}),
+      terms: terms ? { version: terms.version, body: terms.body } : null,
+      timeline: leadFlow.buildTimeline(await leadFlow.getEvents(db, lead.id))
+    });
+  }
+
+  /* ---- lifecycle actions ---- */
+  m = path.match(/^\/api\/portal\/leads\/([\w-]+)\/(\w+)$/);
+  if (m && request.method === "POST") {
+    const [, leadRowId, action] = m;
+    const lead = await db.first(
+      "SELECT * FROM leads WHERE id = ? AND customer_id = ?", leadRowId, customerId);
+    if (!lead) return json({ error: "Lead not found" }, 404);
+    const body = await request.json().catch(() => ({}));
+
+    try {
+      if (action === "claim") {
+        const terms = await leadFlow.activeTerms(db);
+        const customer = await db.first("SELECT * FROM customers WHERE id = ?", customerId);
+        // Refuse to record a claim unless the customer confirmed the terms
+        // they were shown. A claim is a billable act; consent is the record
+        // that makes it collectable.
+        if (terms && !body.acceptTerms)
+          return json({ error: "You must accept the lead terms to claim this opportunity.", terms: { version: terms.version, body: terms.body } }, 400);
+
+        const updated = await leadFlow.claimLead(db, lead, {
+          ...ctx,
+          terms: terms ? {
+            version: terms.version, hash: terms.content_hash, body: terms.body,
+            disclosure: leadFlow.billingDisclosure(lead.billing_model, customer || {})
+          } : null
+        });
+        return json({ ok: true, lead: updated, message: "You have claimed this opportunity." });
+      }
+      if (action === "pursuing")
+        return json({ ok: true, lead: await leadFlow.markPursuing(db, lead, ctx) });
+      if (action === "bid")
+        return json({ ok: true, lead: await leadFlow.submitBid(db, lead, {
+          ...ctx, amount: body.amount, bidDate: body.bidDate, notes: body.notes }) });
+      if (action === "outcome")
+        return json({ ok: true, lead: await leadFlow.reportOutcome(db, lead, {
+          ...ctx, outcome: body.outcome, awardAmount: body.awardAmount,
+          lossReason: body.lossReason, notes: body.notes }) });
+      if (action === "decline")
+        return json({ ok: true, lead: await leadFlow.declineLead(db, lead, { ...ctx, reason: body.reason }) });
+      if (action === "reserve")
+        return json({ ok: true, lead: await leadFlow.reserveLead(db, lead, { ...ctx, hours: body.hours || 48 }) });
+      if (action === "release") {
+        const customer = await db.first("SELECT * FROM customers WHERE id = ?", customerId);
+        const updated = await leadFlow.releaseLead(db, lead, customer, {
+          ...ctx, reason: body.reason, detail: body.detail
+        });
+        return json({ ok: true, lead: updated,
+          message: "Released. You won't be charged for this lead." });
+      }
+    } catch (e) {
+      return json({ error: e.message }, 400);
+    }
+    return json({ error: "Unknown action" }, 404);
+  }
+
+  return json({ error: "Not found" }, 404);
+}
+
+/* ============================================================
+   Admin lead management + attribution.
+   ============================================================ */
+async function handleLeadAdmin({ path, request, db, actor }) {
+  const actorLabel = actor.kind === "legacy-admin" ? "operator" : (actor.userId || "admin");
+
+  if (path === "/api/admin/leads" && request.method === "GET") {
+    const params = new URL(request.url).searchParams;
+    let sql = `SELECT l.*, p.name AS project_name, p.bid_due, c.company_name
+               FROM leads l JOIN projects p ON p.id = l.project_id
+               JOIN customers c ON c.id = l.customer_id WHERE 1=1`;
+    const binds = [];
+    for (const [key, col] of [["status", "l.status"], ["customer", "l.customer_id"], ["billing", "l.billing_status"]]) {
+      const v = params.get(key);
+      if (v) { sql += ` AND ${col} = ?`; binds.push(v); }
+    }
+    const q = params.get("q");
+    if (q) { sql += " AND (l.lead_id LIKE ? OR p.name LIKE ? OR c.company_name LIKE ?)"; binds.push(`%${q}%`, `%${q}%`, `%${q}%`); }
+    sql += " ORDER BY l.delivered_at DESC LIMIT 500";
+    return json(await db.all(sql, ...binds));
+  }
+
+  // Deliver a project to one or more customers.
+  if (path === "/api/admin/leads/deliver" && request.method === "POST") {
+    const body = await request.json().catch(() => ({}));
+    const customerIds = body.customerIds || (body.customerId ? [body.customerId] : []);
+    if (!body.projectId || !customerIds.length)
+      return json({ error: "projectId and at least one customerId are required." }, 400);
+
+    const delivered = [], failed = [];
+    for (const customerId of customerIds) {
+      try {
+        const lead = await leadFlow.deliverLead(db, {
+          projectId: body.projectId, customerId,
+          exclusivity: body.exclusivity || "shared",
+          attributionWindowDays: body.attributionWindowDays ?? 180,
+          actorId: actor.userId, actorLabel,
+          priceOverride: body.price ?? null
+        });
+
+        // Push into the customer's own CRM if they've configured a webhook.
+        // A failure here is reported but never rolls back the delivery —
+        // the lead exists in our database either way.
+        const [proj, cust] = await Promise.all([
+          db.first("SELECT * FROM projects WHERE id = ?", body.projectId),
+          db.first("SELECT * FROM customers WHERE id = ?", customerId)
+        ]);
+        const hook = await webhooks.deliverWebhook(db, { lead, project: proj, customer: cust });
+
+        delivered.push({ ...lead, webhook: hook });
+      } catch (e) {
+        failed.push({ customerId, error: e.message });
+      }
+    }
+    // Partial success is reported honestly rather than as a blanket OK.
+    return json({ delivered, failed, ok: failed.length === 0 });
+  }
+
+  /* ---- release rates by discovery source ----
+     Which sources produce leads contractors claim and then hand back.
+     This is the payoff for having a release window at all. */
+  if (path === "/api/admin/leads/release-analytics" && request.method === "GET") {
+    const since = new URL(request.url).searchParams.get("since");
+    return json(await leadFlow.releaseAnalytics(db, { since }));
+  }
+
+  let m = path.match(/^\/api\/admin\/leads\/([\w-]+)\/attribution$/);
+  if (m && request.method === "GET") {
+    const lead = await db.first("SELECT * FROM leads WHERE id = ? OR lead_id = ?", m[1], m[1]);
+    if (!lead) return json({ error: "Lead not found" }, 404);
+    return json(await leadFlow.attributionRecord(db, lead));
+  }
+
+  m = path.match(/^\/api\/admin\/leads\/([\w-]+)$/);
+  if (m && request.method === "GET") {
+    const lead = await db.first("SELECT * FROM leads WHERE id = ? OR lead_id = ?", m[1], m[1]);
+    if (!lead) return json({ error: "Lead not found" }, 404);
+    const [project, customer, events] = await Promise.all([
+      db.getProject(lead.project_id),
+      db.first("SELECT * FROM customers WHERE id = ?", lead.customer_id),
+      leadFlow.getEvents(db, lead.id)
+    ]);
+    return json({
+      lead, project, customer,
+      timeline: leadFlow.buildTimeline(events),
+      confidence: leadFlow.attributionConfidence(events)
+    });
+  }
+
+  // Void an event. The row is NEVER deleted (spec §47) — voiding writes a
+  // marker plus an EVENT_VOIDED event, so the original stays visible.
+  m = path.match(/^\/api\/admin\/lead-events\/([\w-]+)\/void$/);
+  if (m && request.method === "POST") {
+    const body = await request.json().catch(() => ({}));
+    if (!body.reason) return json({ error: "A reason is required to void an event." }, 400);
+    const ev = await db.first("SELECT * FROM lead_events WHERE id = ?", m[1]);
+    if (!ev) return json({ error: "Event not found" }, 404);
+    await db.run("UPDATE lead_events SET voided_at = ?, voided_by = ?, void_reason = ? WHERE id = ?",
+      new Date().toISOString(), actor.userId || "operator", body.reason, m[1]);
+    await leadFlow.appendEvent(db, {
+      leadId: ev.lead_id, projectId: ev.project_id, customerId: ev.customer_id,
+      eventType: "EVENT_VOIDED", actorType: "admin", actorId: actor.userId, actorLabel,
+      metadata: { voided_event_id: ev.id, voided_event_type: ev.event_type, reason: body.reason }
+    });
+    // Status is recomputed from the surviving events.
+    const events = await leadFlow.getEvents(db, ev.lead_id);
+    await db.update("leads", ev.lead_id, { status: leadFlow.deriveStatus(events) });
+    return json({ ok: true });
+  }
+
+  /* ---- live activity feed (spec §24) ---- */
+  if (path === "/api/admin/activity" && request.method === "GET") {
+    const rows = await db.all(
+      `SELECT e.*, l.lead_id AS lead_number, p.name AS project_name, c.company_name
+         FROM lead_events e
+         JOIN leads l ON l.id = e.lead_id
+         LEFT JOIN projects p ON p.id = e.project_id
+         LEFT JOIN customers c ON c.id = e.customer_id
+        ORDER BY e.created_at DESC LIMIT 100`);
+    return json(rows);
+  }
+
+  /* ---- terms management (spec §38) ---- */
+  // Webhook config lives on the customer record; this route also exposes
+  // the delivery log so a silent failure is visible rather than assumed.
+  let wm = path.match(/^\/api\/admin\/customers\/([\w-]+)\/webhook$/);
+  if (wm && request.method === "PUT") {
+    const body = await request.json().catch(() => ({}));
+    const format = body.format || "generic";
+    if (!["generic", "tinttechos"].includes(format))
+      return json({ error: "format must be 'generic' or 'tinttechos'." }, 400);
+    if (format === "tinttechos" && body.enabled && !body.authKey)
+      return json({ error: "The TintOS format requires an intakeKey (authKey)." }, 400);
+
+    await db.update("customers", wm[1], {
+      webhook_url: body.url || null,
+      webhook_secret: body.secret || null,
+      webhook_format: format,
+      webhook_auth_key: body.authKey || null,
+      webhook_enabled: body.enabled ? 1 : 0
+    });
+    return json({ ok: true });
+  }
+  if (wm && request.method === "GET") {
+    // webhook_secret and webhook_auth_key are never returned.
+    const c = await db.first(
+      "SELECT webhook_url, webhook_enabled, webhook_format FROM customers WHERE id = ?", wm[1]);
+    const recent = await db.all(
+      "SELECT id, lead_id, status, response_code, error, created_at FROM webhook_deliveries WHERE customer_id = ? ORDER BY created_at DESC LIMIT 25",
+      wm[1]);
+    return json({ ...c, recent });
+  }
+
+  if (path === "/api/admin/terms" && request.method === "GET")
+    return json(await db.all("SELECT * FROM lead_terms_versions ORDER BY created_at DESC"));
+
+  if (path === "/api/admin/terms" && request.method === "POST") {
+    const body = await request.json().catch(() => ({}));
+    if (!body.version || !body.body) return json({ error: "version and body are required." }, 400);
+    const hash = await auth.sha256Hex(body.body);
+    if (body.activate) await db.run("UPDATE lead_terms_versions SET is_active = 0");
+    return json(await db.insert("lead_terms_versions", {
+      version: body.version, body: body.body, content_hash: hash,
+      is_active: body.activate ? 1 : 0, updated_at: new Date().toISOString()
+    }));
+  }
+
+  return null;
+}
+
 export default {
   /* ================= HTTP ================= */
   async fetch(request, env, ctx) {
@@ -179,11 +641,28 @@ export default {
       return json({ ok: true, added, lead });
     }
 
-    if (!authorized(request, env)) {
-      return new Response("Login required", {
-        status: 401,
-        headers: { "WWW-Authenticate": 'Basic realm="Bid Hunter"' }
-      });
+    /* ---- Authentication ----------------------------------------------
+       Contractors log in with their own username/password and get a
+       server-side session cookie. The operator's legacy APP_PASSWORD basic
+       auth still works and is admin-equivalent, so existing bookmarks and
+       the email-ingest token keep functioning. */
+    const authDb = makeDb(env);
+
+    if (path.startsWith("/api/auth/")) {
+      return handleAuthRoutes({ path, request, env, db: authDb });
+    }
+
+    const actor = await auth.identify(request, env, authDb);
+
+    if (!actor) {
+      if (!path.startsWith("/api/")) return env.ASSETS.fetch(request);
+      return json({ error: "Login required" }, 401);
+    }
+
+    // A contractor session may only reach portal routes. Single server-side
+    // chokepoint preventing one customer reading another's data.
+    if (actor.kind === "contractor" && path.startsWith("/api/") && !auth.contractorMayAccess(path)) {
+      return json({ error: "Not authorized" }, 403);
     }
 
     if (!path.startsWith("/api/")) return env.ASSETS.fetch(request);
@@ -364,6 +843,24 @@ export default {
         meta.bcLastSync = new Date().toISOString();
         await store.set("meta", meta);
         return json({ ok: true, found: leads.length, added });
+      }
+
+      /* ---- Contractor portal (Phase C) ---- */
+      if (path.startsWith("/api/portal/")) {
+        return handlePortalRoutes({ path, request, env, db: makeDb(env), actor });
+      }
+
+      /* ---- Admin: leads & attribution (Phase B) ---- */
+      if (path.startsWith("/api/admin/leads") || path.startsWith("/api/admin/lead-events")
+          || path === "/api/admin/activity" || path === "/api/admin/terms") {
+        const handled = await handleLeadAdmin({ path, request, db: makeDb(env), actor });
+        if (handled) return handled;
+      }
+
+      /* ---- Admin: customers & logins (Phase A) ---- */
+      if (path.startsWith("/api/admin/customers") || path.startsWith("/api/admin/users")) {
+        const handled = await handleAccountAdmin({ path, request, db: makeDb(env) });
+        if (handled) return handled;
       }
 
       /* ================= V2 ROUTES ================= */
@@ -1953,6 +2450,13 @@ export default {
     const store = makeStore(env);
     const db = makeDb(env);
     ctx.waitUntil((async () => {
+      // Release lead reservations that lapsed without a claim, so a lead
+      // parked by one contractor becomes available again on schedule.
+      try {
+        const expired = await leadFlow.expireReservations(db);
+        if (expired.expired) console.log("[leads] reservations expired:", expired.expired);
+      } catch (e) { console.error("[leads] reservation expiry failed:", e.message); }
+
       const isMonday = new Date(event.scheduledTime).getUTCDay() === 1;
       let scanSummary = null;
       if (isMonday) {
