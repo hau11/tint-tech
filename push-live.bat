@@ -20,6 +20,7 @@ set "MODE=%~1"
 set "APPURL=https://tint-intelligence-ai.haut011.workers.dev"
 set "WHO=%TEMP%\bh-whoami.txt"
 set "CHG=%TEMP%\bh-changes.txt"
+set "PUSHLOG=%TEMP%\bh-push.txt"
 set "PUSHWARN="
 
 echo ===============================================
@@ -112,15 +113,33 @@ if errorlevel 1 (
   goto :afterpush
 )
 :pushonly
-"%GIT%" push
-if errorlevel 1 (
+"%GIT%" push > "%PUSHLOG%" 2>&1
+if not errorlevel 1 goto :pushok
+type "%PUSHLOG%"
+REM A rejected push is not a network blip. It means GitHub holds commits this
+REM folder does not, so THIS CHECKOUT IS STALE, and deploying it would put
+REM older code live than what is in the repo. Stop rather than regress.
+findstr /C:"rejected" "%PUSHLOG%" >nul
+if not errorlevel 1 (
   echo.
-  echo       WARNING: push failed. Your commit is safe locally but is NOT
-  echo       on GitHub. Deploy continues.
-  set "PUSHWARN=1"
-) else (
-  echo       pushed to GitHub.
+  echo *** PUSH REJECTED -- STOPPING BEFORE DEPLOY. ***
+  echo.
+  echo GitHub has commits this folder does not, so this checkout is behind.
+  echo Deploying it would replace the live site with OLDER code.
+  echo.
+  echo Most likely you are in the wrong folder. Compare the path above
+  echo against the checkout you have been working in. If it is the right
+  echo folder, run  git pull  here first, then run push-live again.
+  goto :fail
 )
+echo.
+echo       WARNING: push failed, but not as a rejection, so this is likely
+echo       the network. Your commit is safe locally but is NOT on GitHub.
+echo       Deploy continues.
+set "PUSHWARN=1"
+goto :afterpush
+:pushok
+echo       pushed to GitHub.
 :afterpush
 echo.
 
