@@ -110,7 +110,11 @@ const fullProject = {
   address: "2401 Gillham Rd", general_contractor: "JE Dunn", architect: "HOK",
   owner: "XYZ Health", project_type: "Healthcare", bid_due: "2026-09-04",
   estimated_project_value: 4200000, estimated_glazing_square_feet: 12500,
-  solicitation_number: "IFB-24-118", source_url: "https://sam.gov/opp/1", source: "SAM.gov"
+  // project_number is the real column on `projects` (0001_initial_v2.sql).
+  // This fixture said solicitation_number, which exists nowhere in the
+  // schema, so the assertion below passed against a field no real row
+  // carries while production shipped solicitationNumber: undefined.
+  project_number: "IFB-24-118", source_url: "https://sam.gov/opp/1", source: "SAM.gov"
 };
 
 test("TintOS payload emits only keys the receiver accepts", () => {
