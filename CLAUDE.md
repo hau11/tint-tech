@@ -13,25 +13,27 @@ documents, KV for cache. Frontend is React built with esbuild into two
 bundles. No framework, no ORM, no build step for the worker itself.
 
 ```bash
-npm test              # node --test, 327 passing — keep it that way
+npm test              # node --test, 343 passing — keep it that way
 npm run build         # builds public/app.js and public/portal.js
 npx wrangler dev      # local
 npx wrangler deploy
-npx wrangler d1 migrations apply bid-hunter --remote
+npx wrangler d1 migrations apply tint-intelligence --remote
+push-live             # test + build + commit&push + deploy, in one step
+push-live check       # same, but ends in --dry-run and changes nothing
 ```
 
 ## Layout
 
 ```
-src/worker.js      HTTP + cron entry. 110KB. All routing lives here.
+src/worker.js      HTTP + cron entry. 132KB. All routing lives here.
 src/db.js          D1 data access layer
 src/auth.js        accounts, PBKDF2 passwords, sessions
 src/leads.js       lead lifecycle + immutable attribution events
 src/webhooks.js    outbound lead delivery to a customer's own CRM
 src/engines.js     deterministic scoring/takeoff math (no AI)
 src/analyze.js     Claude-backed document analysis
-frontend/app.jsx   admin UI (300KB bundle)
-frontend/portal.jsx contractor portal (168KB bundle)
+frontend/app.jsx   admin UI (1057KB bundle; pdf.js is bundled in)
+frontend/portal.jsx contractor portal (171KB bundle)
 migrations/        D1 migrations, applied in order
 tests/             node --test, pure-function heavy
 ```
@@ -78,6 +80,15 @@ session — never from the URL or body.
 **`leads` is a local variable name** in three digest/cron blocks in
 `worker.js`. The module is imported as `leadFlow`. Shadowing it throws at
 runtime via temporal dead zone.
+
+**The portal must stay publicly reachable.** `auth.isPublicAsset(path)` lets
+`/portal`, `/portal.html` and `/portal.js` through before authentication, and
+`portal.html` loads exactly one script, so those three are the whole set.
+Remove it and every paying contractor is locked out: they hold their own
+username and password, but the page that asks for them sits behind the
+operator's Basic-auth prompt. This shipped broken once and no test caught it.
+`tests/auth.test.js` pins it now, including that the match is exact so
+`/portal.js.map` and `/portalx` stay closed. The admin UI is gated on purpose.
 
 ## Auth model
 
