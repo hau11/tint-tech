@@ -428,10 +428,14 @@ async function scanOne(src, env, store) {
     if (!res.ok) return { status: "error", found: 0, leads: [], error: `HTTP ${res.status}` };
     const html = await res.text();
     const leads = src.kind === "fmdc" ? parseFmdcHtml(html) : parseGenericHtml(html, src);
-    // Heuristic: JS-rendered portals return pages with almost no readable text
-    const textLen = cheerio.load(html)("body").text().replace(/\s+/g, " ").length;
-    if (leads.length === 0 && textLen < 600) {
-      return { status: "js-portal", found: 0, leads: [], error: src.note || "Page renders with JavaScript - check it manually." };
+    // Heuristic: JS-rendered portals return pages with almost no readable text.
+    // Only worth a full DOM parse when the cheap parser found nothing; doing it
+    // on every page spent CPU on exactly the sources that already worked.
+    if (leads.length === 0) {
+      const textLen = cheerio.load(html)("body").text().replace(/\s+/g, " ").length;
+      if (textLen < 600) {
+        return { status: "js-portal", found: 0, leads: [], error: src.note || "Page renders with JavaScript - check it manually." };
+      }
     }
     return { status: "ok", found: leads.length, leads };
   } catch (e) {
@@ -464,8 +468,30 @@ function isStale(lead) {
   return false;
 }
 
-export async function runDiscovery(env, store) {
-  const results = await Promise.all(SOURCES.map(async src => ({ src, ...(await scanOne(src, env, store)) })));
+// Cloudflare caps one Worker invocation at 50 subrequests on the free plan.
+// SOURCES is 89 entries and the SAM source fans out to 8 queries of its own,
+// so scanning everything at once asks for roughly 96 and the invocation is
+// killed before it can reply -- which the browser surfaces as a bare
+// "Failed to fetch" with no status code to go on. Scanning in slices keeps
+// every invocation comfortably inside the cap.
+export const SCAN_BATCH = 10;
+
+/** Pure slice maths for a batched scan. Exported so it can be tested directly. */
+export function scanSlice(total, offset, limit) {
+  const t = Math.max(0, Math.floor(total) || 0);
+  const start = Math.min(Math.max(0, Math.floor(offset) || 0), t);
+  const want = Math.floor(limit) || SCAN_BATCH;
+  // Clamped on both ends: a caller cannot ask for one source at a time and
+  // crawl forever, nor raise the batch back over the subrequest cap.
+  const size = Math.min(Math.max(1, want), SCAN_BATCH);
+  const end = Math.min(start + size, t);
+  return { start, end, nextOffset: end, done: end >= t, total: t };
+}
+
+export async function runDiscovery(env, store, { offset = 0, limit = SCAN_BATCH } = {}) {
+  const plan = scanSlice(SOURCES.length, offset, limit);
+  const batch = SOURCES.slice(plan.start, plan.end);
+  const results = await Promise.all(batch.map(async src => ({ src, ...(await scanOne(src, env, store)) })));
   const discovered = ((await store.get("discovered")) || []).filter(l => !isStale(l));
   const dismissed = (await store.get("dismissed")) || [];
   const opportunities = (await store.get("opportunities")) || [];
@@ -489,7 +515,11 @@ export async function runDiscovery(env, store) {
   return {
     sources: results.map(r => ({ id: r.src.id, name: r.src.name, status: r.status, found: r.found, error: r.error || null })),
     new: fresh.length,
-    leads: updated
+    leads: updated,
+    offset: plan.start,
+    nextOffset: plan.nextOffset,
+    total: plan.total,
+    done: plan.done
   };
 }
 

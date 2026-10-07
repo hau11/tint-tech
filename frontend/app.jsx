@@ -2928,12 +2928,28 @@ function Discovery({onImported}){
 
   const scan = async ()=>{
     setScanning(true); setErr(""); setMsg("");
+    // The worker scans a slice per call, because one Cloudflare invocation
+    // cannot make the ~96 subrequests all 89 sources need. Walk the cursor it
+    // hands back until it says done, showing progress as each batch lands.
+    const seen = []; let newLeads = 0; let offset = 0; let guard = 0;
     try{
-      const r = await api("/discovery/run", {method:"POST"});
-      setLeads(Array.isArray(r?.leads)?r.leads:[]);
-      setSources(Array.isArray(r?.sources)?r.sources:null);
-      const ok = r.sources.filter(s=>s.status==="ok").length;
-      setMsg(`Scan complete — ${ok}/${r.sources.length} sources responded, ${r.new} new leads.`);
+      for(;;){
+        const r = await api("/discovery/run", {method:"POST", body:{offset}});
+        seen.push(...(Array.isArray(r?.sources)?r.sources:[]));
+        newLeads += Number(r?.new) || 0;
+        if(Array.isArray(r?.leads)) setLeads(r.leads);
+        setSources([...seen]);
+        const total = Number(r?.total) || seen.length;
+        setMsg(`Scanning… ${Math.min(seen.length,total)} of ${total} sources checked.`);
+        const next = Number(r?.nextOffset);
+        // Stop on done, and also if the cursor ever fails to advance, so a
+        // malformed response cannot spin this loop forever.
+        if(r?.done || !Number.isFinite(next) || next <= offset) break;
+        offset = next;
+        if(++guard > 100) break;
+      }
+      const ok = seen.filter(s=>s.status==="ok").length;
+      setMsg(`Scan complete — ${ok}/${seen.length} sources responded, ${newLeads} new leads.`);
     }catch(e){ setErr("Scan failed: " + e.message); }
     setScanning(false);
   };

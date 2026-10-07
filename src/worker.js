@@ -806,8 +806,14 @@ export default {
       /* ---- Discovery ---- */
       if (path === "/api/discovery/leads" && request.method === "GET")
         return json((await store.get("discovered")) || []);
-      if (path === "/api/discovery/run" && request.method === "POST")
-        return json(await runDiscovery(env, store));
+      // Scans ONE slice per call and returns a cursor; the client walks it to
+      // completion. See SCAN_BATCH in discovery.js for why a single request
+      // cannot cover all 89 sources. offset/limit are clamped there, so a
+      // hand-crafted request cannot widen the batch back past the cap.
+      if (path === "/api/discovery/run" && request.method === "POST") {
+        const body = await request.json().catch(() => ({}));
+        return json(await runDiscovery(env, store, { offset: body.offset, limit: body.limit }));
+      }
       m = path.match(/^\/api\/discovery\/import\/([\w-]+)$/);
       if (m && request.method === "POST") {
         const discovered = (await store.get("discovered")) || [];
@@ -2489,10 +2495,28 @@ export default {
       let scanSummary = null;
       if (isMonday) {
         try {
-          const r = await runDiscovery(env, store);
-          const okCount = r.sources.filter(s => s.status === "ok").length;
-          scanSummary = `${okCount}/${r.sources.length} sources responded, ${r.new} new leads.`;
-          console.log("[discovery] weekly:", scanSummary);
+          // A cron invocation gets the same 50-subrequest budget as any other,
+          // so it cannot sweep all 89 sources either -- this ran every Monday
+          // and failed every Monday, visible only in the logs. It now covers a
+          // few batches and resumes from the stored cursor next week, wrapping
+          // at the end, so every source is reached on a rolling basis.
+          const CRON_BATCHES = 3;
+          const meta = (await store.get("meta")) || {};
+          let offset = Number(meta.discoveryCursor) || 0;
+          const sources = [];
+          let newLeads = 0;
+          for (let i = 0; i < CRON_BATCHES; i++) {
+            const r = await runDiscovery(env, store, { offset });
+            sources.push(...r.sources);
+            newLeads += r.new;
+            offset = r.done ? 0 : r.nextOffset;
+            if (r.done) break;
+          }
+          meta.discoveryCursor = offset;
+          await store.set("meta", meta);
+          const okCount = sources.filter(s => s.status === "ok").length;
+          scanSummary = `${okCount}/${sources.length} sources responded, ${newLeads} new leads.`;
+          console.log("[discovery] weekly:", scanSummary, "next cursor:", offset);
         } catch (e) {
           scanSummary = "Discovery scan failed: " + e.message;
           console.error("[discovery] weekly failed:", e.message);
