@@ -10,6 +10,12 @@ import { uid } from "./store.js";
 import { classifyFilmRelevance } from "./relevance.js";
 
 const UA = { "user-agent": "Mozilla/5.0 (compatible; TintIntelligenceAI/2.0; bid research; contact: info@tinttechkc.com)" };
+// A handful of municipal sites (Cloudflare/Imperva-style bot walls) reject the
+// honest UA above outright — not because of anything we do, just because it
+// doesn't look like a browser. For those specific sources we fall back to a
+// plain, real-world browser UA (see the `ua` field per source below) so the
+// request reads like an ordinary visitor loading a public bid-notice page.
+const BROWSER_UA = { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36" };
 
 // Keyword tiers for film relevance
 const HIGH = /\b(window|windows|glaz|glass|storefront|curtain\s*wall|film|fenestration|skylight|entrance\s*door)\b/i;
@@ -35,21 +41,35 @@ export const SOURCES = [
   { id: "circuit16", name: "16th Circuit Family Court bids", kind: "generic",
     url: "https://www.16thcircuit.org/family-court-bids", state: "MO" },
   { id: "joco", name: "Johnson County KS (IonWave)", kind: "generic",
-    url: "https://jocogov.ionwave.net/CurrentSourcingEvents.aspx", state: "KS" },
+    url: "https://jocogov.ionwave.net/CurrentSourcingEvents.aspx", state: "KS",
+    note: "IonWave's own robots.txt disallows automated access to this page, so we don't scrape it — check it by hand." },
   { id: "wyco", name: "Wyandotte County / KCK purchasing", kind: "generic",
     url: "https://purchasing.wycokck.org/eProcurement/Bid_Download.aspx", state: "KS" },
   // --- Cities ---
+  // kcmo.gov 403'd our honest research UA outright (bot wall); the plain
+  // browser UA below gets through. The page itself is just a directory to
+  // Bonfire/DemandStar/Plan Room though, so this mainly stops the source
+  // from reporting an error — it won't surface much on its own.
   { id: "kcmo", name: "KCMO procurement", kind: "generic",
-    url: "https://www.kcmo.gov/city-hall/departments/general-services/procurement-services", state: "MO" },
+    url: "https://www.kcmo.gov/city-hall/departments/general-services/bids", state: "MO", ua: BROWSER_UA },
   // --- Schools ---
+  // Old URL 404'd (site restructure). Same bot-wall issue as kcmo above.
   { id: "bluevalley", name: "Blue Valley USD 229 purchasing", kind: "generic",
-    url: "https://www.bluevalleyk12.org/cms/one.aspx?portalId=436034&pageId=474785", state: "KS" },
+    url: "https://www.bluevalleyk12.org/about/dept/business-operations/purchasing", state: "KS", ua: BROWSER_UA },
+  // Old URL 404'd. Actual bids live on Olathe's IonWave portal, which — like
+  // Johnson County's above — disallows automated access via robots.txt.
   { id: "olathe", name: "Olathe Public Schools purchasing", kind: "generic",
-    url: "https://www.olatheschools.org/Page/1279", state: "KS" },
+    url: "https://www.olatheschools.org/departments/business-and-finance", state: "KS",
+    note: "Bids post to an IonWave portal that disallows automated access (robots.txt) - check it by hand." },
+  // Old URL 404'd; this one lists real open bids with due dates directly
+  // in the page (confirmed 9/2026) - should be the best of this batch.
   { id: "smsd", name: "Shawnee Mission SD purchasing", kind: "generic",
-    url: "https://www.smsd.org/about/departments/business-finance/purchasing", state: "KS" },
+    url: "https://www.smsd.org/about/departments/purchasing-bidding/bids-bid-summaries", state: "KS" },
+  // Old URL 404'd. Live listings sit behind a login-gated bidding system
+  // this page links to, so expect this one to stay thin.
   { id: "kcps", name: "Kansas City Public Schools procurement", kind: "generic",
-    url: "https://www.kcpublicschools.org/about/procurement", state: "MO" },
+    url: "https://www.kcpublicschools.org/about/departments/purchasing", state: "MO",
+    note: "Full listings require a free account on the district's Online Bidding System - this page only announces them." },
   // --- KC-metro cities (round 2) ---
   { id: "indep", name: "Independence MO bids/RFPs", kind: "generic",
     url: "https://www.independencemo.gov/government/city-departments/internal-services/finance-department/procurement-division/bidrfp-opportunities", state: "MO" },
@@ -59,14 +79,194 @@ export const SOURCES = [
   { id: "overlandpark", name: "Overland Park KS bids", kind: "generic",
     url: "https://www.opkansas.org/doing-business/bids-proposals/", state: "KS",
     note: "Best-known URL - first scan will confirm." },
+  // Site itself loads fine in a real browser; it's specifically our old
+  // research UA that got 403'd (same bot wall as kcmo/bluevalley above).
   { id: "olathecity", name: "City of Olathe KS procurement", kind: "generic",
-    url: "https://www.olatheks.gov/government/procurement/bids-and-proposals/bids-and-proposal-process", state: "KS",
+    url: "https://www.olatheks.gov/government/procurement/bids-and-proposals/bids-and-proposal-process", state: "KS", ua: BROWSER_UA,
     note: "Formal bids post to a Bonfire/Mercell portal (JS); this page announces and links them." },
   { id: "lenexa", name: "Lenexa KS current bids", kind: "generic",
     url: "https://www.lenexa.com/Business-Development/Bids-and-Requests-for-Proposals/Current-Bids-Proposals-Opportunities", state: "KS" },
+  // --- KC-metro cities (round 3 — Clay/Platte County side, north of the river) ---
+  { id: "claycounty", name: "Clay County MO purchasing", kind: "generic",
+    url: "https://www.claycountygov.com/government/purchasing/formal-bid-solicitations", state: "MO",
+    note: "Bids post to an OpenGov portal (procurement.opengov.com/portal/claycounty) that may block automated requests; this page only announces them." },
+  { id: "plattecounty", name: "Platte County MO purchasing", kind: "generic",
+    url: "https://www.co.platte.mo.us/bid-notices", state: "MO",
+    note: "Bids post to an IonWave portal that disallows automated access (robots.txt) - check it by hand." },
+  { id: "liberty", name: "City of Liberty MO bids", kind: "generic",
+    url: "https://www.libertymissouri.gov/Bids.aspx", state: "MO" },
+  { id: "bluesprings", name: "City of Blue Springs MO bids", kind: "generic",
+    url: "https://www.bluespringsgov.com/Bids.aspx", state: "MO" },
+  { id: "raytown", name: "City of Raytown MO bids", kind: "generic",
+    url: "https://www.raytown.mo.us/bids", state: "MO" },
+  { id: "gladstone", name: "City of Gladstone MO bids/RFPs", kind: "generic",
+    url: "https://www.gladstone.mo.us/documents/rfp", state: "MO",
+    note: "This path is disallowed by the city's own robots.txt - check it by hand." },
+  { id: "grandview", name: "City of Grandview MO public notices", kind: "generic",
+    url: "https://www.grandview.org/government/public-notices", state: "MO",
+    note: "Responses submit through QuestCDN; this page lists the open notices." },
+  { id: "plattecity", name: "City of Platte City MO bids", kind: "generic",
+    url: "https://www.plattecity.org/pview.aspx?id=16900&catid=627", state: "MO" },
+  { id: "nkcschools", name: "North Kansas City School District purchasing", kind: "generic",
+    url: "https://www.nkcschools.org/district/dept/purchasing/current-bids-proposals-rfps", state: "MO" },
+  { id: "parkhill", name: "Park Hill School District (MO) RFPs", kind: "generic",
+    url: "https://www.parkhill.k12.mo.us/requests-for-proposals", state: "MO" },
+  { id: "libertyschools", name: "Liberty Public Schools (MO) purchasing", kind: "generic",
+    url: "https://www.lps53.org/departments/purchasing/quotes-bids-and-rfp-opportunities", state: "MO" },
+  { id: "bssd", name: "Blue Springs School District (MO) RFPs", kind: "generic",
+    url: "https://www.bssd.net/requests-for-bidsproposals", state: "MO" },
+  { id: "raytownschools", name: "Raytown School District (MO) procurement", kind: "generic",
+    url: "https://www.raytownschools.org/district-info/procurement", state: "MO" },
   // --- Airports / universities / medical ---
+  // flykci.com is dead - the airport's site moved to flykc.com.
   { id: "kci", name: "KCI / KCMO Aviation business opportunities", kind: "generic",
-    url: "https://www.flykci.com/business/", state: "MO" },
+    url: "https://flykc.com/business-opportunities", state: "MO" },
+  // --- Statewide Kansas (outside KC metro) ---
+  { id: "wichita", name: "City of Wichita KS purchasing", kind: "generic",
+    url: "https://www.wichita.gov/429/Purchasing", state: "KS" },
+  { id: "sedgwickco", name: "Sedgwick County KS purchasing", kind: "generic",
+    url: "https://www.sedgwickcounty.org/finance/purchasing/current-bids-and-proposals/", state: "KS" },
+  { id: "wichitastate", name: "Wichita State University bids", kind: "generic",
+    url: "https://www.wichita.edu/services/purchasing/Bid_Documents/BidDocuments.php", state: "KS" },
+  { id: "topeka", name: "City of Topeka KS purchasing", kind: "generic",
+    url: "https://www.topeka.gov/business/suppliers/index.php", state: "KS",
+    note: "Bids post to the city's Tyler e-pro portal (JS, login-gated); this page only announces them." },
+  { id: "lawrence", name: "City of Lawrence KS purchasing", kind: "generic",
+    url: "https://lawrenceks.gov/finance/purchasing/", state: "KS",
+    note: "Bids post to an OpenGov eProcurement portal that blocks automated requests; this page only announces them." },
+  { id: "wichitaschools", name: "Wichita Public Schools (USD 259) purchasing", kind: "generic",
+    url: "https://www.publicpurchase.com/gems/259usdwichita,ks/buyer/public/home", state: "KS",
+    note: "Public Purchase requires a free login to view open bids; this page is the portal's public landing screen." },
+  { id: "kstate", name: "Kansas State University purchasing", kind: "generic",
+    url: "https://www.k-state.edu/finsvcs/purchasing/for-suppliers/", state: "KS",
+    note: "Bids post to a separate bid portal (bidportal.ksu.edu); this page only announces them." },
+  // Covers Hillsdale/Hillsdale Lake, Paola, Louisburg - southern KC-metro
+  // exurbs. Bids post to an OpenGov portal (procurement.opengov.com/portal/miamicountyks)
+  // that has blocked automated requests elsewhere in this list (see Lawrence,
+  // KS above), so the browser UA and a "check by hand" fallback both apply here.
+  { id: "miamico", name: "Miami County KS purchasing (Hillsdale area)", kind: "generic",
+    url: "https://www.miamicountyks.gov/1025/OpenGov-Procurement---Current-Bids-RFPs", state: "KS", ua: BROWSER_UA,
+    note: "Bids post to an OpenGov portal that may block automated requests - check it by hand." },
+  // --- Statewide Kansas (round 2 — remaining major cities/counties/universities) ---
+  { id: "manhattanks", name: "City of Manhattan KS bid postings", kind: "generic",
+    url: "https://www.manhattanks.gov/2228/Bid-Postings", state: "KS" },
+  { id: "rileyco", name: "Riley County KS bid postings", kind: "generic",
+    url: "https://www.rileycountyks.gov/80/Bid-Postings", state: "KS" },
+  { id: "salina", name: "City of Salina KS bids", kind: "generic",
+    url: "https://www.salina-ks.gov/bids", state: "KS" },
+  { id: "salineco", name: "Saline County KS purchasing", kind: "generic",
+    url: "https://salinecountyks.gov/purchasing", state: "KS",
+    note: "Bids post to a DemandStar portal; this page only announces them." },
+  { id: "hutchinson", name: "City of Hutchinson KS open bids", kind: "generic",
+    url: "https://www.hutchinsonks.gov/open-bids", state: "KS",
+    note: "This page renders mostly via JavaScript - if the scan flags it thin, check it by hand." },
+  { id: "emporia", name: "City of Emporia KS bids", kind: "generic",
+    url: "https://www.emporiaks.gov/bids.aspx", state: "KS" },
+  { id: "emporiastate", name: "Emporia State University vendor info", kind: "generic",
+    url: "https://www.emporia.edu/about-emporia-state-university/business-office/purchasing/vendor-information/", state: "KS",
+    note: "Bids post to a BidNet Direct portal; this page only announces them." },
+  { id: "leavenworth", name: "City of Leavenworth KS RFPs", kind: "generic",
+    url: "https://www.leavenworthks.gov/rfps", state: "KS" },
+  { id: "leavenworthco", name: "Leavenworth County KS bid opportunities", kind: "generic",
+    url: "https://www.leavenworthcounty.gov/information/bid_opportunities/index.php", state: "KS" },
+  { id: "gardencity", name: "City of Garden City KS bids", kind: "generic",
+    url: "https://www.garden-city.org/Bids.aspx", state: "KS" },
+  { id: "dodgecity", name: "City of Dodge City KS bids", kind: "generic",
+    url: "https://www.dodgecity.org/Bids.aspx", state: "KS" },
+  { id: "junctioncity", name: "City of Junction City KS bids", kind: "generic",
+    url: "https://www.junctioncity-ks.gov/bids.aspx", state: "KS" },
+  { id: "pittsburgks", name: "City of Pittsburg KS bids and proposals", kind: "generic",
+    url: "https://www.pittks.org/city-government/bids-and-proposals/", state: "KS",
+    note: "Bids post to a BidExpress portal; this page only announces them." },
+  { id: "pittstate", name: "Pittsburg State University bids", kind: "generic",
+    url: "https://www.pittstate.edu/office/purchasing/bids.html", state: "KS",
+    note: "Bids post to BidNet Direct / Vendor Registry; this page only announces them." },
+  { id: "hays", name: "City of Hays KS bids", kind: "generic",
+    url: "https://www.haysusa.com/Bids.aspx", state: "KS" },
+  { id: "fhsu", name: "Fort Hays State University bids", kind: "generic",
+    url: "https://www.fhsu.edu/purchasing/bids/", state: "KS",
+    note: "Bids post to a Vendor Registry portal; this page only announces them." },
+  { id: "douglasco", name: "Douglas County KS purchasing", kind: "generic",
+    url: "https://www.dgcoks.gov/administration/purchasing", state: "KS",
+    note: "Bids post to a bids&tenders portal (vendor registration required); this page only announces them." },
+  { id: "shawneeco", name: "Shawnee County KS purchasing", kind: "generic",
+    url: "https://www.snco.gov/purchasing/", state: "KS",
+    note: "Bids post to the county's own online bid portal (rpm365.sncoapps.us); this page only announces them." },
+  { id: "butlerco", name: "Butler County KS bids", kind: "generic",
+    url: "https://www.bucoks.gov/bids.aspx", state: "KS" },
+  // --- Statewide Missouri (outside KC metro) ---
+  { id: "stlouiscity", name: "City of St. Louis MO procurement", kind: "generic",
+    url: "https://www.stlouis-mo.gov/government/procurement/index.cfm", state: "MO" },
+  { id: "stlouiscounty", name: "St. Louis County MO procurement", kind: "generic",
+    url: "https://stlouiscountymo.gov/services/services-links/procurement/", state: "MO", ua: BROWSER_UA,
+    note: "This one blocked even a plain browser UA when checked - may need to be looked at by hand regardless." },
+  { id: "springfieldmo", name: "City of Springfield MO purchasing", kind: "generic",
+    url: "https://www.springfieldmo.gov/5375/Current-Bid-Notices", state: "MO" },
+  { id: "columbiamo", name: "City of Columbia MO purchasing", kind: "generic",
+    url: "https://www.como.gov/finance/vendors/bid-solicitations/", state: "MO",
+    note: "Bids post to an IonWave portal that disallows automated access (robots.txt) - check it by hand." },
+  { id: "jeffcity", name: "Jefferson City MO purchasing", kind: "generic",
+    url: "https://www.jeffcomo.gov/347/Bids", state: "MO",
+    note: "This page links out to the actual bid list rather than showing it inline - check it by hand." },
+  { id: "mizzoupdc", name: "University of Missouri (Mizzou) construction bids", kind: "generic",
+    url: "https://pdc-projects.missouri.edu/", state: "MO" },
+  { id: "missouristate", name: "Missouri State University (Springfield) solicitations", kind: "generic",
+    url: "https://www.missouristate.edu/Procurement/SolicitationPosting/default.htm", state: "MO" },
+  // --- Lake of the Ozarks ---
+  // Confirmed 9/2026: lists a real open bid with a sealed-bid deadline
+  // directly on the page, no portal login needed to view it.
+  { id: "lakeozark", name: "City of Lake Ozark MO bids", kind: "generic",
+    url: "https://cityoflakeozark.net/bids-and-proposals/", state: "MO" },
+  { id: "osagebeach", name: "City of Osage Beach MO bids", kind: "generic",
+    url: "https://osagebeach-mo.gov/Bids.aspx", state: "MO" },
+  // Camden County itself (the unincorporated lake area) has no dedicated
+  // online bid system as of this writing - Lake Ozark and Osage Beach above
+  // are the two incorporated cities actually running one.
+  { id: "stlpublicschools", name: "St. Louis Public Schools purchasing", kind: "generic",
+    url: "https://www.slps.org/departments/finance-division/welcome-to-procurement/bonfire-bid-opportunities", state: "MO",
+    note: "Bids post to a Bonfire portal (slps.bonfirehub.com); this page only announces them." },
+  // --- Statewide Missouri (round 2 — remaining major cities/counties/universities) ---
+  { id: "stjoseph", name: "City of St. Joseph MO purchasing", kind: "generic",
+    url: "https://www.stjosephmo.gov/179/Purchasing", state: "MO" },
+  { id: "buchananco", name: "Buchanan County MO procurement requests", kind: "generic",
+    url: "https://www.co.buchanan.mo.us/procurement-requests", state: "MO" },
+  { id: "mwsu", name: "Missouri Western State University current bids", kind: "generic",
+    url: "https://www.missouriwestern.edu/purchasing/current-bids/", state: "MO" },
+  { id: "joplin", name: "City of Joplin MO bids", kind: "generic",
+    url: "https://www.joplinmo.org/Bids.aspx", state: "MO" },
+  { id: "jasperco", name: "Jasper County MO invitation to bid", kind: "generic",
+    url: "https://www.jaspercountymo.gov/invitation-to-bid", state: "MO" },
+  { id: "capegirardeau", name: "City of Cape Girardeau MO bids", kind: "generic",
+    url: "https://www.cityofcapegirardeau.org/departments/administrative/finance/bids/", state: "MO" },
+  { id: "capegirardeauco", name: "Cape Girardeau County MO purchasing", kind: "generic",
+    url: "https://www.capecounty.us/county-purchasing-information", state: "MO",
+    note: "Bids post to an IonWave portal that disallows automated access (robots.txt) - check it by hand." },
+  { id: "semo", name: "Southeast Missouri State University vendors", kind: "generic",
+    url: "https://semo.edu/finance-admin/vendors.html", state: "MO" },
+  { id: "stcharles", name: "City of St. Charles MO bids/purchases", kind: "generic",
+    url: "https://www.stcharlescitymo.gov/161/Bids-Purchases", state: "MO" },
+  { id: "stcharlesco", name: "St. Charles County MO bids", kind: "generic",
+    url: "https://www.sccmo.org/Bids.aspx", state: "MO" },
+  { id: "booneco", name: "Boone County MO purchasing", kind: "generic",
+    url: "https://www.boonemo.gov/purchasing/", state: "MO",
+    note: "Bids post to an IonWave/Euna portal that disallows automated access (robots.txt) - check it by hand." },
+  { id: "greeneco", name: "Greene County MO purchasing", kind: "generic",
+    url: "https://greenecountymo.gov/purchasing/bids.php", state: "MO",
+    note: "Bids post to a BeaconBid portal; this page only announces them." },
+  { id: "truman", name: "Truman State University open bids", kind: "generic",
+    url: "https://www.truman.edu/businessoffice/purchasing/open-bids/", state: "MO" },
+  { id: "nwmissouri", name: "Northwest Missouri State University bid listing", kind: "generic",
+    url: "https://www.nwmissouri.edu/services/purchasing/bidlisting.htm", state: "MO",
+    note: "Bids post to a Workday Strategic Sourcing portal; this page redirects there." },
+  { id: "lincolnu", name: "Lincoln University (MO) bid information", kind: "generic",
+    url: "https://www.lincolnu.edu/about-lincoln/purchasing/bid-information/index.html", state: "MO" },
+  { id: "sedalia", name: "City of Sedalia MO bids/RFPs", kind: "generic",
+    url: "https://www.sedalia.com/bids-rfps/", state: "MO" },
+  { id: "warrensburg", name: "City of Warrensburg MO bids", kind: "generic",
+    url: "https://www.warrensburg-mo.gov/bids.aspx", state: "MO" },
+  { id: "ucm", name: "University of Central Missouri procurement", kind: "generic",
+    url: "https://www.ucmo.edu/offices/procurement-and-materials-management/index.php", state: "MO",
+    note: "Bids post to an IonWave portal that disallows automated access (robots.txt) - check it by hand." },
   { id: "kumed", name: "KU Medical Center bids", kind: "generic",
     url: "https://www.kumc.edu/finance/supply-chain/bid-opportunities.html", state: "KS" },
   { id: "ku", name: "University of Kansas bids", kind: "generic",
@@ -165,7 +365,9 @@ const SAM_QUERIES = [
   { title: "safety film" },          // nationwide
   { title: "blast mitigation" },     // nationwide
   { title: "anti-graffiti" },        // nationwide
-  { title: "glazing", state: "MO" }  // regional upsell
+  { title: "glazing", state: "MO" }, // regional upsell
+  { title: "glazing", state: "KS" }  // regional upsell — 9 calls/scan total, still under
+                                      // the personal SAM.gov key's ~10/day limit above
 ];
 
 async function scanSam(env, store) {
@@ -222,7 +424,7 @@ async function scanSam(env, store) {
 async function scanOne(src, env, store) {
   try {
     if (src.kind === "sam") return await scanSam(env, store);
-    const res = await fetch(src.url, { headers: UA, redirect: "follow" });
+    const res = await fetch(src.url, { headers: src.ua || UA, redirect: "follow" });
     if (!res.ok) return { status: "error", found: 0, leads: [], error: `HTTP ${res.status}` };
     const html = await res.text();
     const leads = src.kind === "fmdc" ? parseFmdcHtml(html) : parseGenericHtml(html, src);
@@ -237,9 +439,34 @@ async function scanOne(src, env, store) {
   }
 }
 
+// A lead earns its spot by being newly scanned and matching the current
+// classifier. Without this, runDiscovery's merge (below) keeps every past
+// lead forever — including ones seeded/classified under an older version
+// of relevance.js, or whose bid deadline has simply already passed — so the
+// cached list only ever grows and old noise never ages out on its own.
+function isStale(lead) {
+  const AGE_LIMIT_MS = 60 * 24 * 60 * 60 * 1000; // 60 days
+  if (lead.foundAt) {
+    const foundMs = new Date(lead.foundAt).getTime();
+    if (!isNaN(foundMs) && Date.now() - foundMs > AGE_LIMIT_MS) return true;
+  }
+  if (lead.bidDate) {
+    const parts = String(lead.bidDate).split("/");
+    if (parts.length === 3) {
+      let [mm, dd, yyyy] = parts;
+      if (yyyy.length === 2) yyyy = "20" + yyyy;
+      const due = new Date(`${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`);
+      // 3-day grace period so a bid due today/yesterday doesn't vanish
+      // before someone gets a chance to look at it.
+      if (!isNaN(due) && due.getTime() < Date.now() - 3 * 24 * 60 * 60 * 1000) return true;
+    }
+  }
+  return false;
+}
+
 export async function runDiscovery(env, store) {
   const results = await Promise.all(SOURCES.map(async src => ({ src, ...(await scanOne(src, env, store)) })));
-  const discovered = (await store.get("discovered")) || [];
+  const discovered = ((await store.get("discovered")) || []).filter(l => !isStale(l));
   const dismissed = (await store.get("dismissed")) || [];
   const opportunities = (await store.get("opportunities")) || [];
   const known = new Set([

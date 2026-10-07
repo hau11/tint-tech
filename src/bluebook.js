@@ -24,9 +24,17 @@ const pick = (obj, keys) => {
 /** Normalize a date-ish value to M/D/YYYY, the format the rest of Discovery expects. */
 function normalizeDate(v) {
   if (!v) return "";
-  const d = new Date(v);
+  const s = String(v).trim();
+  // A bare YYYY-MM-DD carries no timezone, so `new Date()` reads it as UTC
+  // midnight while the getters below are local. Anywhere west of UTC a bid
+  // due 9/15 then renders as 9/14 and the reminders fire a day early. Blue
+  // Book sends plenty of date-only values, so read the parts directly.
+  const ymd = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (ymd) return `${+ymd[2]}/${+ymd[3]}/${ymd[1]}`;
+  // Anything else (a full timestamp) names a real instant; local is right.
+  const d = new Date(s);
   if (!isNaN(d)) return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
-  return String(v);
+  return s;
 }
 
 /**

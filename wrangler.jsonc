@@ -11,10 +11,9 @@
     {
       "binding": "DB",
       "database_name": "tint-intelligence",
-      "database_id": "PASTE_YOUR_D1_ID_HERE"
+      "database_id": "c3589794-a92f-47f2-a103-ad0459352be0"
     }
   ],
-  "migrations_dir": "migrations",
   "r2_buckets": [
     {
       "binding": "DOCUMENTS",
@@ -24,7 +23,7 @@
   "kv_namespaces": [
     {
       "binding": "BLUEPRINTS",
-      "id": "PASTE_YOUR_KV_ID_HERE"
+      "id": "380da4d2f09540fc8619fe7056d048b5"
     }
   ],
   "triggers": {

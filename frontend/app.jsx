@@ -3,8 +3,12 @@ import {
   LayoutDashboard, Radar, FileSearch, Building2, Plus, X, Sparkles,
   Upload, Send, Calculator, FileText, Copy, Download, ChevronRight,
   Clock, MapPin, Phone, Mail, Globe, Trash2, RefreshCw, CheckCircle2, Rss,
-  AlertTriangle, Loader2, ArrowLeft, Pencil, Save, Link2
+  AlertTriangle, Loader2, ArrowLeft, Pencil, Save, Link2, Minimize2, Scissors,
+  SplitSquareHorizontal
 } from "lucide-react";
+import { PDFDocument } from "pdf-lib";
+import * as pdfjsLib from "pdfjs-dist";
+pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
 /* ============ DESIGN TOKENS (Tint Tech KC brand) ============ */
 const CSS = `
@@ -2341,13 +2345,200 @@ function Opportunities({opps,addOpp,openOpp,adding,setAdding}){
 }
 
 /* ============ BLUEPRINT COPILOT ============ */
+/* ---- In-browser PDF shrinker ----
+ * Runs entirely on the user's machine (no upload to any server but ours, and
+ * only once the file is already small enough). Two independent techniques,
+ * used together:
+ *   1. Page-range extraction (pdf-lib) — drop pages you don't need.
+ *   2. Rasterize + recompress (pdfjs-dist renders each page to a canvas,
+ *      the canvas re-encodes it as a JPEG at reduced resolution/quality,
+ *      pdf-lib reassembles the JPEGs into a new PDF). This is the same
+ *      trick sites like iLovePDF/Smallpdf use under the hood for scanned
+ *      drawing sets, which is why it works so well on them.
+ */
+// A ladder from mild to aggressive. Construction drawings are almost always
+// black/white line work even when scanned in color, so the later rungs also
+// drop to grayscale before JPEG encoding -- that alone cuts file size a lot
+// with very little real loss of legibility (the AI only needs to read text
+// and lines, not print the sheet).
+const SHRINK_PRESETS = [
+  { key: "standard", label: "Standard", scale: 1.5, quality: 0.6, grayscale: false },
+  { key: "smaller", label: "Smaller", scale: 1.1, quality: 0.5, grayscale: false },
+  { key: "grayscale", label: "Grayscale", scale: 1.0, quality: 0.45, grayscale: true },
+  { key: "extraSmall", label: "Extra small", scale: 0.75, quality: 0.35, grayscale: true },
+  { key: "lastResort", label: "Last resort", scale: 0.55, quality: 0.25, grayscale: true },
+];
+
+// Forgiving on purpose: pulls out every "N" or "N-M" token no matter what
+// separates them (commas, "and", semicolons, plain spaces, newlines) and
+// ignores everything else. So "1-40 and 41-93", "1-40, 90-110", and
+// "1-40; 90-110" all work the same. The lookarounds keep it from grabbing a
+// number stuck inside a word (e.g. the "08" in "division08" is NOT a page).
+const PAGE_TOKEN_RE = /(?<![a-zA-Z0-9])(\d+)\s*-\s*(\d+)(?![a-zA-Z0-9])|(?<![a-zA-Z0-9])(\d+)(?![a-zA-Z0-9])/g;
+
+function parsePageRanges(input, maxPage) {
+  const set = new Set();
+  for (const m of String(input).matchAll(PAGE_TOKEN_RE)) {
+    if (m[1] && m[2]) {
+      let a = parseInt(m[1], 10), b = parseInt(m[2], 10);
+      if (a > b) [a, b] = [b, a];
+      for (let i = a; i <= b; i++) if (i >= 1 && i <= maxPage) set.add(i - 1);
+    } else if (m[3]) {
+      const n = parseInt(m[3], 10);
+      if (n >= 1 && n <= maxPage) set.add(n - 1);
+    }
+  }
+  return [...set].sort((a, b) => a - b);
+}
+
+// Turns [0,1,2,11] (0-indexed) into "1-3, 12" for display in the page-range box.
+function pageIndicesToRangeString(indices) {
+  const sorted = [...indices].sort((a, b) => a - b).map(i => i + 1);
+  const parts = [];
+  let start = sorted[0], prev = sorted[0];
+  for (let i = 1; i <= sorted.length; i++) {
+    const n = sorted[i];
+    if (n === prev + 1) { prev = n; continue; }
+    parts.push(start === prev ? `${start}` : `${start}-${prev}`);
+    start = prev = n;
+  }
+  return parts.join(", ");
+}
+
+async function getPdfPageCount(bytes) {
+  const src = await PDFDocument.load(bytes);
+  return src.getPageCount();
+}
+
+async function extractPageRange(bytes, rangeStr) {
+  const src = await PDFDocument.load(bytes);
+  const maxPage = src.getPageCount();
+  const indices = parsePageRanges(rangeStr, maxPage);
+  if (indices.length === 0) {
+    // .match (not .test) so we don't rely on PAGE_TOKEN_RE's shared, mutable lastIndex.
+    const looksNumeric = String(rangeStr).match(PAGE_TOKEN_RE) !== null;
+    throw new Error(looksNumeric
+      ? `None of those page numbers are between 1 and ${maxPage} (that's how many pages this file has).`
+      : `Type page numbers there, like "1-40, 90-110" — not a description. Blueprint Copilot can't tell which pages are which without you opening the file first (this one has ${maxPage} pages).`);
+  }
+  const out = await PDFDocument.create();
+  const copied = await out.copyPages(src, indices);
+  copied.forEach(p => out.addPage(p));
+  return out.save({ useObjectStreams: true });
+}
+
+// Window film / tinting scope keywords -- used by the "Find window film
+// pages" scan below. Deliberately kept to film-and-tint-specific language
+// only (not generic glazing/curtain-wall/storefront terms) so it surfaces
+// pages that are actually your scope, not the broader glazing package.
+// Only works on PDFs that have an actual text layer (vector/CAD-exported
+// PDFs, or ones already OCR'd); pure image scans have nothing for pdf.js to
+// search, which the caller detects and reports honestly.
+const SCOPE_KEYWORDS = [
+  "window film", "window tint", "window tinting", "solar film", "security film",
+  "safety film", "safety and security film", "anti-graffiti film", "graffiti film",
+  "spandrel film", "low-e film", "low emissivity film", "decorative film",
+  "glazing film", "film glazing", "tint film", "solar control film",
+];
+
+async function findScopePages(bytes, keywords = SCOPE_KEYWORDS) {
+  const src = await pdfjsLib.getDocument({ data: bytes }).promise;
+  const matched = new Set();
+  let sawAnyText = false;
+  for (let i = 1; i <= src.numPages; i++) {
+    const page = await src.getPage(i);
+    const content = await page.getTextContent();
+    const text = content.items.map(it => it.str).join(" ").toLowerCase();
+    if (text.trim().length > 0) sawAnyText = true;
+    if (keywords.some(k => text.includes(k))) matched.add(i - 1);
+    page.cleanup();
+  }
+  return { matchedIndices: [...matched].sort((a, b) => a - b), pageCount: src.numPages, hasText: sawAnyText };
+}
+
+// Shared by shrinkPdfBytes and splitIntoChunks below.
+async function renderPageToJpeg(page, preset) {
+  const viewport = page.getViewport({ scale: preset.scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.ceil(viewport.width));
+  canvas.height = Math.max(1, Math.ceil(viewport.height));
+  const ctx = canvas.getContext("2d");
+  if (preset.grayscale) ctx.filter = "grayscale(1)";
+  ctx.fillStyle = "#ffffff"; // scanned pages are often transparent; JPEG has no alpha
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  const dataUrl = canvas.toDataURL("image/jpeg", preset.quality);
+  const jpegBytes = Uint8Array.from(atob(dataUrl.split(",")[1]), c => c.charCodeAt(0));
+  return { jpegBytes, viewport };
+}
+
+async function shrinkPdfBytes(bytes, preset, onProgress) {
+  const src = await pdfjsLib.getDocument({ data: bytes }).promise;
+  const out = await PDFDocument.create();
+  for (let i = 1; i <= src.numPages; i++) {
+    onProgress?.(i, src.numPages);
+    const page = await src.getPage(i);
+    const { jpegBytes, viewport } = await renderPageToJpeg(page, preset);
+    const jpegImage = await out.embedJpg(jpegBytes);
+    const pageDoc = out.addPage([viewport.width, viewport.height]);
+    pageDoc.drawImage(jpegImage, { x: 0, y: 0, width: viewport.width, height: viewport.height });
+    page.cleanup();
+  }
+  return out.save({ useObjectStreams: true });
+}
+
+// Splits a PDF into several smaller PDFs, each aimed at (roughly) targetSize
+// bytes, by rendering pages once and packing them greedily -- start a new
+// file whenever the current one is about to cross the target. Used for
+// files the user wants to keep in full (not just the film/glazing pages)
+// but broken into pieces small enough to upload or email individually.
+async function splitIntoChunks(bytes, { targetSize, preset, onProgress }) {
+  const src = await pdfjsLib.getDocument({ data: bytes }).promise;
+  const chunks = [];
+  let currentDoc = await PDFDocument.create();
+  let currentSize = 0;
+  let currentFirstPage = 1;
+  let currentLastPage = 0;
+  const budget = targetSize * 0.85; // headroom for PDF container overhead
+
+  const finalizeChunk = async () => {
+    if (currentLastPage < currentFirstPage) return;
+    chunks.push({
+      bytes: await currentDoc.save({ useObjectStreams: true }),
+      firstPage: currentFirstPage,
+      lastPage: currentLastPage,
+    });
+  };
+
+  for (let i = 1; i <= src.numPages; i++) {
+    onProgress?.(i, src.numPages, chunks.length + 1);
+    const page = await src.getPage(i);
+    const { jpegBytes, viewport } = await renderPageToJpeg(page, preset);
+    page.cleanup();
+
+    if (currentLastPage >= currentFirstPage && currentSize + jpegBytes.length > budget) {
+      await finalizeChunk();
+      currentDoc = await PDFDocument.create();
+      currentSize = 0;
+      currentFirstPage = i;
+    }
+    const jpegImage = await currentDoc.embedJpg(jpegBytes);
+    const pageDoc = currentDoc.addPage([viewport.width, viewport.height]);
+    pageDoc.drawImage(jpegImage, { x: 0, y: 0, width: viewport.width, height: viewport.height });
+    currentSize += jpegBytes.length;
+    currentLastPage = i;
+  }
+  await finalizeChunk();
+  return chunks;
+}
+
 const QUICK_PROMPTS = [
-  "List every glazing type in the project",
-  "Where is window film or security film specified?",
-  "Estimate total glazing square footage with your math",
-  "Show every sheet or spec section mentioning glazing or film",
-  "Which elevations have the most glazing?",
-  "Generate a takeoff summary with a 10% waste factor"
+  "List every place window film or tinting is called out",
+  "Where is security or safety film specified?",
+  "Estimate total glass square footage so I can size the film job",
+  "Show every sheet or spec section mentioning film or tinting",
+  "Which elevations or windows need film?",
+  "Generate a film takeoff summary with a 10% waste factor"
 ];
 
 function Copilot(){
@@ -2357,8 +2548,31 @@ function Copilot(){
   const [busy,setBusy] = useState(false);
   const [uploading,setUploading] = useState(false);
   const [err,setErr] = useState("");
+  // Fallback matches the server's current default; /api/config is the real
+  // source of truth so this page can never promise a limit the backend
+  // doesn't actually honor (that drift is what caused the ~28MB/10MB mismatch).
+  const [maxDocSize,setMaxDocSize] = useState(16*1024*1024);
+  const [oversized,setOversized] = useState(null); // File that failed the size check
+  const [oversizedPages,setOversizedPages] = useState(null);
+  const [pageRange,setPageRange] = useState("");
+  const [shrinking,setShrinking] = useState(false);
+  const [shrinkStage,setShrinkStage] = useState("");
+  const [shrinkNote,setShrinkNote] = useState("");
+  const [scanning,setScanning] = useState(false);
+  const [scanNote,setScanNote] = useState("");
+  const [splitting,setSplitting] = useState(false);
+  const [splitStage,setSplitStage] = useState("");
+  const [splitNote,setSplitNote] = useState("");
+  const [splitParts,setSplitParts] = useState(null); // [{name,size,url,firstPage,lastPage}]
   const fileRef = useRef();
   const scrollRef = useRef();
+
+  useEffect(()=>{
+    fetch("/api/config").then(r=>r.json()).then(d=>{
+      const size = d?.data?.maxDocumentSize;
+      if(Number.isFinite(size) && size > 0) setMaxDocSize(size);
+    }).catch(()=>{}); // fetch failing just keeps the fallback above
+  },[]);
 
   useEffect(()=>{
     const el = scrollRef.current;
@@ -2366,24 +2580,151 @@ function Copilot(){
     else if(el) el.scrollTop = el.scrollHeight;
   },[msgs,busy]);
 
-  const onFile = async e => {
-    const f = e.target.files?.[0]; if(!f) return;
-    setErr("");
-    if(f.size > 28*1024*1024){ setErr("That file is over ~28 MB. Split the drawing set (most PDF tools can extract the architectural sheets) and upload the relevant portion."); return; }
-    const isPdf = f.type==="application/pdf" || f.name.toLowerCase().endsWith(".pdf");
-    const isImg = /^image\//.test(f.type);
-    if(!isPdf && !isImg){ setErr("Upload a PDF drawing set / spec, or an image of a sheet."); return; }
+  const uploadFile = async (f) => {
+    setUploading(true); setErr("");
     try{
-      setUploading(true);
-      const fd = new FormData(); fd.append("file", f);
+      const fd = new FormData(); fd.append("file", f, f.name);
       const res = await fetch("/api/blueprint/upload", {method:"POST", body:fd});
       const data = await res.json();
       if(!res.ok) throw new Error(data.error || "Upload failed");
       setDoc({name:f.name, size:f.size, docId:data.docId});
       setMsgs([]);
+      setOversized(null); setOversizedPages(null); setPageRange(""); setShrinkNote(""); setScanNote(""); setSplitNote(""); clearSplitParts();
     }catch(ex){ setErr(ex.message); }
     setUploading(false);
+  };
+
+  const onFile = async e => {
+    const f = e.target.files?.[0]; if(!f) return;
+    setErr(""); setOversized(null); setShrinkNote(""); setScanNote(""); setSplitNote(""); clearSplitParts();
+    const isPdf = f.type==="application/pdf" || f.name.toLowerCase().endsWith(".pdf");
+    const isImg = /^image\//.test(f.type);
+    if(!isPdf && !isImg){ setErr("Upload a PDF drawing set / spec, or an image of a sheet."); e.target.value=""; return; }
+    if(f.size > maxDocSize){
+      if(isPdf){
+        setOversized(f);
+        setOversizedPages(null);
+        getPdfPageCount(new Uint8Array(await f.arrayBuffer())).then(setOversizedPages).catch(()=>{});
+      } else setErr(`That file is over ${Math.round(maxDocSize/1048576)} MB, the most Blueprint Copilot can store.`);
+      e.target.value = "";
+      return;
+    }
+    await uploadFile(f);
     e.target.value = "";
+  };
+
+  // Searches the file's own text layer for window film/tinting scope
+  // language and fills the page box with whatever pages mention it. Only
+  // works if the PDF has real text (CAD-exported or already-OCR'd) --
+  // a pure image scan has nothing to search, and we say so plainly.
+  const scanForScope = async () => {
+    if(!oversized) return;
+    setScanning(true); setScanNote(""); setErr("");
+    try{
+      const bytes = new Uint8Array(await oversized.arrayBuffer());
+      const { matchedIndices, hasText } = await findScopePages(bytes);
+      if(matchedIndices.length > 0){
+        const rangeStr = pageIndicesToRangeString(matchedIndices);
+        setPageRange(rangeStr);
+        setScanNote(`Found window film / tinting wording on ${matchedIndices.length} page${matchedIndices.length===1?"":"s"}: ${rangeStr}. Double-check it looks right, then click "Shrink it automatically."`);
+      } else if(!hasText){
+        setScanNote("This looks like a scanned PDF with no searchable text underneath the images, so there's nothing for me to search. Open it in any PDF viewer and note the page numbers yourself.");
+      } else {
+        setScanNote("Didn't find common window film / tinting terms on any page. The spec language on this project may be worded differently — try opening the file and searching it yourself for \"film\" or \"tint.\"");
+      }
+    }catch(ex){
+      setScanNote("Couldn't scan that file: " + (ex.message||"unknown error"));
+    }
+    setScanning(false);
+  };
+
+  const clearSplitParts = () => {
+    setSplitParts(prev => { (prev||[]).forEach(p=>URL.revokeObjectURL(p.url)); return null; });
+  };
+
+  // Breaks the whole file (or just the picked page range) into several
+  // smaller PDFs that each land under the size limit, so you get every
+  // page instead of trading detail away with heavier compression. These
+  // download straight to your computer -- upload whichever part you need
+  // into Blueprint Copilot one at a time.
+  const runSplit = async () => {
+    if(!oversized) return;
+    setSplitting(true); setSplitNote(""); setErr(""); clearSplitParts();
+    try{
+      let bytes = new Uint8Array(await oversized.arrayBuffer());
+      let baseFirstPage = 1;
+      if(pageRange.trim()){
+        setSplitStage("Pulling out the pages you picked…");
+        const src0 = await PDFDocument.load(bytes);
+        const idx = parsePageRanges(pageRange.trim(), src0.getPageCount());
+        if(idx.length === 0){ throw new Error(`Type page numbers there, like "1-40, 90-110" — not a description (this file has ${src0.getPageCount()} pages).`); }
+        baseFirstPage = idx[0] + 1;
+        bytes = new Uint8Array(await extractPageRange(bytes, pageRange.trim()));
+      }
+      const preset = SHRINK_PRESETS[1]; // "Smaller" -- good balance for splitting, not just squeezing one file
+      const chunks = await splitIntoChunks(bytes, {
+        targetSize: maxDocSize,
+        preset,
+        onProgress: (i,n,partNum) => setSplitStage(`Building part ${partNum} — page ${i} of ${n}…`),
+      });
+      if(chunks.length === 0) throw new Error("Nothing to split — that page range came up empty.");
+      const base = oversized.name.replace(/\.pdf$/i,"");
+      const parts = chunks.map((c,idx)=>{
+        const blob = new Blob([c.bytes], {type:"application/pdf"});
+        return {
+          name: `${base} - part ${idx+1} of ${chunks.length} (p${baseFirstPage+c.firstPage-1}-${baseFirstPage+c.lastPage-1}).pdf`,
+          size: blob.size,
+          url: URL.createObjectURL(blob),
+          firstPage: baseFirstPage+c.firstPage-1,
+          lastPage: baseFirstPage+c.lastPage-1,
+        };
+      });
+      setSplitParts(parts);
+      setSplitNote(`Split into ${parts.length} file${parts.length===1?"":"s"}, each under ${Math.round(maxDocSize/1048576)} MB. Download whichever ones you need below, then upload one at a time into Blueprint Copilot to ask about it.`);
+    }catch(ex){
+      setSplitNote(ex.message || "Couldn't split that file.");
+    }
+    setSplitting(false); setSplitStage("");
+  };
+
+  // Runs entirely in the browser: page-range extraction (if given) then
+  // rasterize+recompress, auto-escalating to a smaller preset if the first
+  // pass still isn't small enough. Nothing leaves the machine until the
+  // final, already-small file goes to our own /api/blueprint/upload.
+  const runShrink = async () => {
+    if(!oversized) return;
+    setShrinking(true); setShrinkNote(""); setErr("");
+    try{
+      let bytes = new Uint8Array(await oversized.arrayBuffer());
+      if(pageRange.trim()){
+        setShrinkStage("Pulling out the pages you picked…");
+        bytes = new Uint8Array(await extractPageRange(bytes, pageRange.trim()));
+      }
+      let outBytes = null;
+      for(let idx=0; idx<SHRINK_PRESETS.length; idx++){
+        const preset = SHRINK_PRESETS[idx];
+        const tryingHarder = idx>0;
+        setShrinkStage(tryingHarder ? "Still too big — trying a smaller setting…" : "Shrinking the drawings…");
+        const attemptBytes = bytes.slice(); // pdf.js detaches the buffer it's given
+        const result = await shrinkPdfBytes(attemptBytes, preset, (i,n)=>
+          setShrinkStage(`${tryingHarder?"Trying a smaller setting":"Shrinking the drawings"} — page ${i} of ${n}…`)
+        );
+        if(result.byteLength <= maxDocSize){ outBytes = result; break; }
+      }
+      if(!outBytes){
+        const pageHint = oversizedPages ? ` (it has ${oversizedPages} pages — try something like "1-40, 90-110")` : "";
+        setShrinkNote(`Even at the smallest setting this is still over ${Math.round(maxDocSize/1048576)} MB. Open the file, note which page numbers you actually need${pageHint}, and enter those in the box above, then shrink again.`);
+        setShrinking(false);
+        return;
+      }
+      setShrinkStage("Uploading the shrunk file…");
+      const name = oversized.name.replace(/\.pdf$/i,"") + "-shrunk.pdf";
+      const blob = new Blob([outBytes], {type:"application/pdf"});
+      await uploadFile(new File([blob], name, {type:"application/pdf"}));
+    }catch(ex){
+      setShrinkNote(ex.message || "Couldn't shrink that file.");
+    }
+    setShrinking(false); setShrinkStage("");
   };
 
   const ask = async (question) => {
@@ -2413,8 +2754,61 @@ function Copilot(){
       </div>
       {err && <p style={{color:"var(--bad)",fontSize:13,margin:"0 0 10px"}}><AlertTriangle size={14} style={{verticalAlign:-2}}/> {err}</p>}
 
+      {oversized && (
+        <div className="card" style={{padding:16,marginBottom:14,border:"1px solid var(--line)"}}>
+          <div style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:12}}>
+            <Minimize2 size={18} style={{color:"var(--azure)",flexShrink:0,marginTop:2}}/>
+            <div>
+              <div style={{fontWeight:700,fontSize:14}}>Shrink "{oversized.name}"</div>
+              <p style={{fontSize:12.5,color:"var(--slate)",margin:"3px 0 0"}}>
+                {(oversized.size/1048576).toFixed(1)} MB — over the {Math.round(maxDocSize/1048576)} MB limit. Everything below runs right here in your browser (no Acrobat, no other website). "Shrink" compresses and uploads automatically; "Split" instead breaks it into several smaller files you download and upload one at a time.
+              </p>
+            </div>
+          </div>
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12.5,color:"var(--slate)",marginBottom:6}}>
+            <Scissors size={14} style={{flexShrink:0}}/>
+            <span style={{whiteSpace:"nowrap"}}>Only these pages (optional):</span>
+            <input value={pageRange} onChange={e=>setPageRange(e.target.value)} disabled={shrinking||scanning}
+              placeholder="e.g. 1-40, 90-110" style={{flex:1,fontSize:12.5}}/>
+            <button className="btn ghost" disabled={shrinking||scanning} onClick={scanForScope} style={{whiteSpace:"nowrap",flexShrink:0}}>
+              {scanning?<Loader2 size={13} style={{animation:"spin 1s linear infinite"}}/>:<FileSearch size={13}/>}
+              {scanning?"Scanning…":"Find window film pages"}
+            </button>
+          </label>
+          <p style={{fontSize:11.5,color:"var(--slate)",margin:"0 0 12px 22px"}}>
+            {oversizedPages ? `This file has ${oversizedPages} pages. ` : ""}
+            Type page numbers yourself, or click "Find window film pages" and I'll search the file's own text for you. Leave blank to shrink the whole file.
+          </p>
+          {scanNote && <p style={{color:"var(--slate)",fontSize:12.5,margin:"0 0 10px",background:"#EEF3FA",padding:"8px 10px",borderRadius:8}}><FileSearch size={13} style={{verticalAlign:-2}}/> {scanNote}</p>}
+          {shrinkNote && <p style={{color:"var(--warn)",fontSize:12.5,margin:"0 0 10px"}}><AlertTriangle size={13} style={{verticalAlign:-2}}/> {shrinkNote}</p>}
+          {splitNote && <p style={{color:"var(--slate)",fontSize:12.5,margin:"0 0 10px",background:"#EEF3FA",padding:"8px 10px",borderRadius:8}}><SplitSquareHorizontal size={13} style={{verticalAlign:-2}}/> {splitNote}</p>}
+          {splitParts && (
+            <div style={{display:"flex",flexDirection:"column",gap:6,margin:"0 0 12px"}}>
+              {splitParts.map((p,i)=>(
+                <a key={i} href={p.url} download={p.name} className="card"
+                  style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 12px",fontSize:12.5,textDecoration:"none",color:"var(--navy)",border:"1px solid var(--line)"}}>
+                  <span><Download size={13} style={{verticalAlign:-2,marginRight:6}}/>Part {i+1} — pages {p.firstPage}-{p.lastPage}</span>
+                  <span className="mono" style={{color:"var(--slate)"}}>{(p.size/1048576).toFixed(1)} MB</span>
+                </a>
+              ))}
+            </div>
+          )}
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            <button className="btn pri" disabled={shrinking||scanning||splitting} onClick={runShrink}>
+              {shrinking?<Loader2 size={15} style={{animation:"spin 1s linear infinite"}}/>:<Minimize2 size={15}/>}
+              {shrinking ? (shrinkStage||"Shrinking…") : "Shrink it automatically"}
+            </button>
+            <button className="btn ghost" disabled={shrinking||scanning||splitting} onClick={runSplit}>
+              {splitting?<Loader2 size={15} style={{animation:"spin 1s linear infinite"}}/>:<SplitSquareHorizontal size={15}/>}
+              {splitting ? (splitStage||"Splitting…") : "Split into smaller files"}
+            </button>
+            <button className="btn ghost" disabled={shrinking||scanning||splitting} onClick={()=>{setOversized(null); setOversizedPages(null); setPageRange(""); setShrinkNote(""); setScanNote(""); setSplitNote(""); clearSplitParts(); setErr("");}}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       {!doc ? (
-        <Empty icon={FileSearch} title="Drop in a drawing set" body="PDF drawing sets, project manuals, spec books, addenda, or a photo of a single sheet. The copilot finds glazing systems, film specs, and square footage — and cites the sheets behind every answer.">
+        <Empty icon={FileSearch} title="Drop in a drawing set" body="PDF drawing sets, project manuals, spec books, addenda, or a photo of a single sheet. The copilot finds window film and tinting specs, glass square footage, and security/safety film requirements — and cites the sheets behind every answer.">
           <button className="btn pri" onClick={()=>fileRef.current.click()}><Upload size={15}/>Upload plans</button>
           <p style={{fontSize:12,color:"var(--slate)",marginTop:12}}>Tip: for huge plan books, extract just the architectural (A-series) sheets and Division 08 specs first — faster and sharper answers.</p>
         </Empty>
@@ -2435,7 +2829,7 @@ function Copilot(){
           </div>
           <div style={{display:"flex",gap:8}}>
             <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&ask(input)}
-              placeholder='Ask the plans — "How many sq ft of glazing on Level 2?"'/>
+              placeholder='Ask the plans — "How many sq ft of glass need film on Level 2?"'/>
             <button className="btn pri" disabled={busy||!input.trim()} onClick={()=>ask(input)} aria-label="Send"><Send size={16}/></button>
           </div>
         </>

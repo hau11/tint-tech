@@ -59,8 +59,8 @@ export function buildTintTechOsPayload({ lead, project, customer, intakeKey }) {
     projectTitle: project?.name ? String(project.name).slice(0, 300) : undefined,
     estimatedValue: Number.isFinite(Number(project?.estimated_project_value))
       ? Number(project.estimated_project_value) : undefined,
-    solicitationNumber: project?.solicitation_number
-      ? String(project.solicitation_number).slice(0, 120) : undefined,
+    solicitationNumber: project?.project_number
+      ? String(project.project_number).slice(0, 120) : undefined,
     dueDate: project?.bid_due ? String(project.bid_due).slice(0, 40) : undefined,
     sourceUrl: project?.source_url ? String(project.source_url).slice(0, 1000) : undefined,
     meta: {
