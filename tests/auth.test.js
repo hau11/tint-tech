@@ -3,7 +3,7 @@ import assert from "node:assert";
 import {
   hashPassword, verifyPassword, timingSafeEqual, newSessionToken,
   sha256Hex, parseCookies, sessionCookie, createUser, createCustomer,
-  login, logout, identify, isAdmin, contractorMayAccess, SESSION_COOKIE
+  login, logout, identify, isAdmin, contractorMayAccess, isPublicAsset, SESSION_COOKIE
 } from "../src/auth.js";
 
 /* ------------------------------------------------------------------
@@ -233,4 +233,29 @@ test("contractors are confined to portal routes", () => {
   assert.strictEqual(contractorMayAccess("/api/admin/customers"), false);
   assert.strictEqual(contractorMayAccess("/api/opportunities"), false);
   assert.strictEqual(contractorMayAccess("/api/v2/projects/123/pricing"), false);
+});
+
+test("the contractor sign-in screen is reachable before authentication", () => {
+  // Without these three the portal is unreachable in production: a contractor
+  // has their own credentials but cannot type them when the page asking for
+  // them sits behind the operator Basic-auth prompt. portal.html loads exactly
+  // one script, /portal.js, so these three paths are the whole requirement.
+  assert.strictEqual(isPublicAsset("/portal"), true);
+  assert.strictEqual(isPublicAsset("/portal.html"), true);
+  assert.strictEqual(isPublicAsset("/portal.js"), true);
+});
+
+test("the public asset allowlist is default-deny", () => {
+  // The admin UI stays behind the password deliberately.
+  assert.strictEqual(isPublicAsset("/"), false);
+  assert.strictEqual(isPublicAsset("/index.html"), false);
+  assert.strictEqual(isPublicAsset("/app.js"), false);
+  // An API route is never a static asset.
+  assert.strictEqual(isPublicAsset("/api/admin/customers"), false);
+  assert.strictEqual(isPublicAsset("/api/portal/leads"), false);
+  // Exact match only, so near-misses cannot widen the hole.
+  assert.strictEqual(isPublicAsset("/portal.js.map"), false);
+  assert.strictEqual(isPublicAsset("/portalx"), false);
+  assert.strictEqual(isPublicAsset("/portal/../index.html"), false);
+  assert.strictEqual(isPublicAsset("/PORTAL"), false);
 });

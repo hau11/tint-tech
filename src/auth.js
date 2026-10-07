@@ -277,3 +277,21 @@ export function contractorMayAccess(path) {
   return path.startsWith("/api/portal/") || path === "/api/auth/me" || path === "/api/auth/logout"
     || path === "/api/auth/change-password";
 }
+
+/**
+ * Static files the sign-in screens need BEFORE anyone is authenticated.
+ * Same default-deny allowlist idea as contractorMayAccess above: a file added
+ * to public/ later stays behind the operator Basic-auth prompt until someone
+ * opens it deliberately.
+ *
+ * The admin UI (/, /index.html, /app.js) is deliberately absent. The portal is
+ * here because a contractor has their own username and password and cannot
+ * type them if the page asking for them is itself gated. Leaving it out is the
+ * regression that shipped once already and locked every customer out.
+ *
+ * Exact matches only. No prefix test, so /portal.js.map and /portalx are not
+ * public, and a mistake falls on the safe side.
+ */
+export function isPublicAsset(path) {
+  return path === "/portal" || path === "/portal.html" || path === "/portal.js";
+}

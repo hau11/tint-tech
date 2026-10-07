@@ -62,12 +62,6 @@ import {
 // which leaves real headroom under that 25 MiB ceiling.
 const MAX_DOCUMENT_SIZE = 16 * 1024 * 1024; // 16 MB
 const ALLOWED_MIME = ["application/pdf", "image/png", "image/jpeg"];
-// Static files the sign-in screens themselves need. Deliberately a
-// default-deny allowlist, matching the contractor-route pattern, so a path
-// added later stays gated until someone opens it on purpose. A contractor
-// has their own username and password but can never type it while the page
-// that asks for it sits behind the operator's Basic-auth prompt.
-const PUBLIC_ASSETS = new Set(["/portal", "/portal.html", "/portal.js"]);
 // Server-side fetch can be larger than a phone upload: it streams into R2 and
 // the browser extracts text locally.
 const MAX_FETCH_SIZE = 60 * 1024 * 1024;
@@ -665,7 +659,7 @@ export default {
     const actor = await auth.identify(request, env, authDb);
 
     if (!actor) {
-      if (env.APP_PASSWORD && !PUBLIC_ASSETS.has(path)) {
+      if (env.APP_PASSWORD && !auth.isPublicAsset(path)) {
         return new Response(
           path.startsWith("/api/") ? JSON.stringify({ error: "Login required" }) : "Login required",
           {
