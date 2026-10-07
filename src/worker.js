@@ -56,8 +56,18 @@ import {
 
 // Single source of truth for upload limits (spec §50) — frontend reads this
 // from /api/config so the two can never disagree.
-const MAX_DOCUMENT_SIZE = 10 * 1024 * 1024; // 10 MB (Workers memory ceiling)
+// The real ceiling isn't Workers memory, it's Cloudflare KV: BLUEPRINTS.put()
+// stores the file base64-encoded (~4/3 bigger) inside a small JSON wrapper,
+// and KV rejects any single value over 25 MiB. 16 MB raw -> ~21.3 MB encoded,
+// which leaves real headroom under that 25 MiB ceiling.
+const MAX_DOCUMENT_SIZE = 16 * 1024 * 1024; // 16 MB
 const ALLOWED_MIME = ["application/pdf", "image/png", "image/jpeg"];
+// Static files the sign-in screens themselves need. Deliberately a
+// default-deny allowlist, matching the contractor-route pattern, so a path
+// added later stays gated until someone opens it on purpose. A contractor
+// has their own username and password but can never type it while the page
+// that asks for it sits behind the operator's Basic-auth prompt.
+const PUBLIC_ASSETS = new Set(["/portal", "/portal.html", "/portal.js"]);
 // Server-side fetch can be larger than a phone upload: it streams into R2 and
 // the browser extracts text locally.
 const MAX_FETCH_SIZE = 60 * 1024 * 1024;
@@ -71,7 +81,7 @@ function validateUpload(file) {
   if (!file || typeof file === "string") return "No file received";
   const name = String(file.name || "").toLowerCase();
   if (file.size > MAX_DOCUMENT_SIZE)
-    return `File is larger than ${Math.round(MAX_DOCUMENT_SIZE / 1048576)} MB. Split the plan set — extract the A-series sheets and Division 08 specs and upload that portion.`;
+    return `File is larger than ${Math.round(MAX_DOCUMENT_SIZE / 1048576)} MB, the most this can store. Split the plan set — extract the A-series sheets and Division 08 specs and upload that portion.`;
   if (!ALLOWED_MIME.includes(file.type) && !ALLOWED_EXT.some(e => name.endsWith(e)))
     return "Only PDF, PNG, and JPEG files are accepted.";
   return null;
@@ -259,6 +269,36 @@ async function handleAccountAdmin({ path, request, db }) {
     const users = await db.all(
       "SELECT id, username, email, full_name, role, is_active, last_login_at FROM users WHERE customer_id = ?", m[1]);
     return json({ ...customer, users });
+  }
+
+  // Webhook config lives on the customer record; this route also exposes
+  // the delivery log so a silent failure is visible rather than assumed.
+  let wm = path.match(/^\/api\/admin\/customers\/([\w-]+)\/webhook$/);
+  if (wm && request.method === "PUT") {
+    const body = await request.json().catch(() => ({}));
+    const format = body.format || "generic";
+    if (!["generic", "tinttechos"].includes(format))
+      return json({ error: "format must be 'generic' or 'tinttechos'." }, 400);
+    if (format === "tinttechos" && body.enabled && !body.authKey)
+      return json({ error: "The TintOS format requires an intakeKey (authKey)." }, 400);
+
+    await db.update("customers", wm[1], {
+      webhook_url: body.url || null,
+      webhook_secret: body.secret || null,
+      webhook_format: format,
+      webhook_auth_key: body.authKey || null,
+      webhook_enabled: body.enabled ? 1 : 0
+    });
+    return json({ ok: true });
+  }
+  if (wm && request.method === "GET") {
+    // webhook_secret and webhook_auth_key are never returned.
+    const c = await db.first(
+      "SELECT webhook_url, webhook_enabled, webhook_format FROM customers WHERE id = ?", wm[1]);
+    const recent = await db.all(
+      "SELECT id, lead_id, status, response_code, error, created_at FROM webhook_deliveries WHERE customer_id = ? ORDER BY created_at DESC LIMIT 25",
+      wm[1]);
+    return json({ ...c, recent });
   }
 
   if (path === "/api/admin/users" && request.method === "POST") {
@@ -559,36 +599,6 @@ async function handleLeadAdmin({ path, request, db, actor }) {
   }
 
   /* ---- terms management (spec §38) ---- */
-  // Webhook config lives on the customer record; this route also exposes
-  // the delivery log so a silent failure is visible rather than assumed.
-  let wm = path.match(/^\/api\/admin\/customers\/([\w-]+)\/webhook$/);
-  if (wm && request.method === "PUT") {
-    const body = await request.json().catch(() => ({}));
-    const format = body.format || "generic";
-    if (!["generic", "tinttechos"].includes(format))
-      return json({ error: "format must be 'generic' or 'tinttechos'." }, 400);
-    if (format === "tinttechos" && body.enabled && !body.authKey)
-      return json({ error: "The TintOS format requires an intakeKey (authKey)." }, 400);
-
-    await db.update("customers", wm[1], {
-      webhook_url: body.url || null,
-      webhook_secret: body.secret || null,
-      webhook_format: format,
-      webhook_auth_key: body.authKey || null,
-      webhook_enabled: body.enabled ? 1 : 0
-    });
-    return json({ ok: true });
-  }
-  if (wm && request.method === "GET") {
-    // webhook_secret and webhook_auth_key are never returned.
-    const c = await db.first(
-      "SELECT webhook_url, webhook_enabled, webhook_format FROM customers WHERE id = ?", wm[1]);
-    const recent = await db.all(
-      "SELECT id, lead_id, status, response_code, error, created_at FROM webhook_deliveries WHERE customer_id = ? ORDER BY created_at DESC LIMIT 25",
-      wm[1]);
-    return json({ ...c, recent });
-  }
-
   if (path === "/api/admin/terms" && request.method === "GET")
     return json(await db.all("SELECT * FROM lead_terms_versions ORDER BY created_at DESC"));
 
@@ -655,6 +665,18 @@ export default {
     const actor = await auth.identify(request, env, authDb);
 
     if (!actor) {
+      if (env.APP_PASSWORD && !PUBLIC_ASSETS.has(path)) {
+        return new Response(
+          path.startsWith("/api/") ? JSON.stringify({ error: "Login required" }) : "Login required",
+          {
+            status: 401,
+            headers: {
+              "content-type": path.startsWith("/api/") ? "application/json" : "text/plain",
+              "WWW-Authenticate": 'Basic realm="Bid Hunter"'
+            }
+          }
+        );
+      }
       if (!path.startsWith("/api/")) return env.ASSETS.fetch(request);
       return json({ error: "Login required" }, 401);
     }
@@ -814,6 +836,18 @@ export default {
         }
         await store.set("discovered", discovered.filter(l => l.id !== m[1]));
         return json({ ok: true });
+      }
+      // One-time reset: runDiscovery() merges every fresh scan onto whatever
+      // is already cached in "discovered" ([...fresh, ...discovered]), so
+      // entries seeded or classified under an older version of relevance.js
+      // never age out on their own — they just keep riding along. This wipes
+      // the cache so the next "Scan now" reflects only what the CURRENT
+      // classifier finds. It does not touch "dismissed", so leads a person
+      // already dismissed by hand stay hidden.
+      if (path === "/api/discovery/clear" && request.method === "POST") {
+        const discovered = (await store.get("discovered")) || [];
+        await store.set("discovered", []);
+        return json({ ok: true, cleared: discovered.length });
       }
 
       /* ---- BuildingConnected (Autodesk) — three-legged OAuth, see src/buildingconnected.js ---- */
