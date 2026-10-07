@@ -2,23 +2,25 @@
 setlocal
 pushd "%~dp0"
 
-REM  push-live.bat  --  Bid Hunter one-step deploy.
+REM  push-live.bat  --  Bid Hunter one-step release.
 REM
-REM    push-live          test -> build -> deploy (goes live)
-REM    push-live check    test -> build -> deploy --dry-run (changes nothing)
+REM    push-live          test -> build -> commit+push -> deploy (goes live)
+REM    push-live check    test -> build -> deploy --dry-run (changes nothing,
+REM                       commits nothing, pushes nothing)
 REM
-REM  Deploy is gated on the test suite on purpose: CLAUDE.md says keep it
-REM  green, and a worker that ships red is worse than one that ships late.
+REM  Deploy is gated on the test suite on purpose: CLAUDE.md asks for it to
+REM  stay green, and a worker that ships red is worse than one that ships late.
 REM
-REM  Database migrations are deliberately NOT run here. They change the
-REM  production schema and are rare; keeping them manual means a routine
-REM  code deploy can never alter your data by surprise. When a migration
-REM  is needed, run it yourself first:
+REM  D1 migrations are deliberately NOT run here. They change the production
+REM  schema and are rare; keeping them manual means a routine code deploy can
+REM  never alter your data by surprise. When one is needed, run it first:
 REM    npx wrangler d1 migrations apply tint-intelligence --remote
 
 set "MODE=%~1"
 set "APPURL=https://tint-intelligence-ai.haut011.workers.dev"
 set "WHO=%TEMP%\bh-whoami.txt"
+set "CHG=%TEMP%\bh-changes.txt"
+set "PUSHWARN="
 
 echo ===============================================
 if /i "%MODE%"=="check" (
@@ -47,12 +49,20 @@ if not exist "%WRANGLER%" (
   goto :fail
 )
 
-echo [1/4] Running the test suite...
+REM ---- find git (not on PATH here; GitHub Desktop ships one) ----
+set "GIT="
+where git >nul 2>&1
+if not errorlevel 1 set "GIT=git"
+if defined GIT goto :gitready
+for /f "delims=" %%D in ('dir /b /ad /o-n "%LOCALAPPDATA%\GitHubDesktop\app-*" 2^>nul') do call :trygit "%%D"
+:gitready
+
+echo [1/5] Running the test suite...
 echo.
 call npm test
 if errorlevel 1 (
   echo.
-  echo *** TESTS FAILED -- NOTHING WAS DEPLOYED. ***
+  echo *** TESTS FAILED -- NOTHING WAS COMMITTED OR DEPLOYED. ***
   echo Fix the failures above, then run push-live again.
   goto :fail
 )
@@ -60,17 +70,61 @@ echo.
 echo       tests passed.
 echo.
 
-echo [2/4] Building the frontend bundles...
+echo [2/5] Building the frontend bundles...
 call npm run build
 if errorlevel 1 (
   echo.
-  echo *** BUILD FAILED -- NOTHING WAS DEPLOYED. ***
+  echo *** BUILD FAILED -- NOTHING WAS COMMITTED OR DEPLOYED. ***
   goto :fail
 )
 echo       built public\app.js and public\portal.js
 echo.
 
-echo [3/4] Checking the Cloudflare login...
+echo [3/5] Committing and pushing to GitHub...
+if /i "%MODE%"=="check" (
+  echo       skipped in check mode.
+  goto :afterpush
+)
+if not defined GIT (
+  echo       WARNING: git not found, so this release will NOT be committed
+  echo       or pushed. Deploy continues. Install Git for Windows to fix.
+  set "PUSHWARN=1"
+  goto :afterpush
+)
+"%GIT%" status --porcelain > "%CHG%" 2>&1
+for %%A in ("%CHG%") do set "CHGSIZE=%%~zA"
+if "%CHGSIZE%"=="0" (
+  echo       working tree is clean, nothing to commit.
+  goto :pushonly
+)
+echo.
+"%GIT%" status --short
+echo.
+set "MSG="
+set /p "MSG=Commit message (press Enter for a timestamped one): "
+if not defined MSG set "MSG=push-live release %DATE% %TIME%"
+"%GIT%" add -A
+"%GIT%" commit -m "%MSG%"
+if errorlevel 1 (
+  echo       WARNING: commit failed. Deploy continues, but this release is
+  echo       not recorded in git.
+  set "PUSHWARN=1"
+  goto :afterpush
+)
+:pushonly
+"%GIT%" push
+if errorlevel 1 (
+  echo.
+  echo       WARNING: push failed. Your commit is safe locally but is NOT
+  echo       on GitHub. Deploy continues.
+  set "PUSHWARN=1"
+) else (
+  echo       pushed to GitHub.
+)
+:afterpush
+echo.
+
+echo [4/5] Checking the Cloudflare login...
 if /i "%MODE%"=="check" goto :skiplogin
 call "%WRANGLER%" whoami > "%WHO%" 2>&1
 findstr /C:"not authenticated" "%WHO%" >nul
@@ -91,16 +145,16 @@ echo       skipped -- a dry run needs no Cloudflare login.
 echo.
 
 if /i "%MODE%"=="check" (
-  echo [4/4] Dry run -- validating the deploy without publishing...
+  echo [5/5] Dry run -- validating the deploy without publishing...
   call "%WRANGLER%" deploy --dry-run
   if errorlevel 1 goto :fail
   echo.
   echo ===== CHECK PASSED. Nothing went live. =====
-  echo Run push-live with no arguments to actually deploy.
+  echo Run push-live with no arguments to actually release.
   goto :done
 )
 
-echo [4/4] Deploying to Cloudflare...
+echo [5/5] Deploying to Cloudflare...
 call "%WRANGLER%" deploy
 if errorlevel 1 (
   echo.
@@ -112,7 +166,17 @@ echo.
 echo ================= LIVE =================
 echo %APPURL%
 echo =======================================
+if defined PUSHWARN (
+  echo.
+  echo  !! This code is LIVE but is not on GitHub. See the warning above.
+  echo  !! It exists only on this computer. Sort that out before relying on it.
+)
 goto :done
+
+:trygit
+if defined GIT goto :eof
+if exist "%LOCALAPPDATA%\GitHubDesktop\%~1\resources\app\git\cmd\git.exe" set "GIT=%LOCALAPPDATA%\GitHubDesktop\%~1\resources\app\git\cmd\git.exe"
+goto :eof
 
 :fail
 echo.
