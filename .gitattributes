@@ -1,0 +1,10 @@
+# The repo content is LF. core.autocrlf is true on this machine, which would
+# otherwise rewrite the working tree to CRLF on the next checkout and make
+# every file look modified. Pin it so the result is the same everywhere.
+* text=auto eol=lf
+
+# The built bundles are committed on purpose so the repo deploys straight from
+# a clone, but a line-by-line diff of minified output is pure noise.
+public/app.js             -diff linguist-generated
+public/portal.js          -diff linguist-generated
+public/pdf.worker.min.mjs -diff linguist-generated

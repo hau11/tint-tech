@@ -2,3 +2,15 @@ node_modules/
 .wrangler/
 .dev.vars
 *.log
+
+# Hand-saved API responses kept for debugging. They go stale the moment
+# they are written and the real data lives in D1, so tracking them just
+# creates diff noise and leaks project details into a public repo.
+projects.json
+scan-results.json
+
+# Artifacts from unrelated Claude sessions (the tinttechkc website,
+# tint-shop-os): ~10MB of zips and screenshots with nothing to do with
+# Bid Hunter. Ignored rather than deleted - move them somewhere outside
+# the project when convenient.
+Claude outputs/
