@@ -297,6 +297,26 @@ export const SOURCES = [
     url: "https://app.az.gov/page.aspx/en/rfp/request_browse_public", state: "AZ" },
   { id: "tncpo", name: "Tennessee Central Procurement Office", kind: "generic",
     url: "https://www.tn.gov/generalservices/procurement/central-procurement-office--cpo-/supplier-information/request-for-proposals--rfp--opportunities1.html", state: "TN" },
+  // MANUAL: the Periscope/BuySpeed "bso" platform. Shared by these four states,
+  // so one adapter would have unlocked all of them, which is why it was tried.
+  // It does not yield: the search runs as a JSF AJAX partial on top of
+  // ViewState, a CSRF token and a session cookie, and a plain form POST just
+  // re-renders the page with no rows and no no-records message. Emulating that
+  // would break silently on any update by them, which is the exact failure this
+  // registry exists to prevent. robots.txt permits /bso (it only disallows
+  // /craft), so this is a brittleness judgement, not an access one.
+  { id: "macommbuys", name: "Massachusetts COMMBUYS", kind: "generic",
+    url: "https://www.commbuys.com/bso/view/search/external/advancedSearchBid.xhtml",
+    state: "MA", access: "MANUAL", note: "Periscope bso platform: results need a JSF AJAX POST, not reachable by fetch." },
+  { id: "njstart", name: "NJSTART", kind: "generic",
+    url: "https://www.njstart.gov/bso/view/search/external/advancedSearchBid.xhtml",
+    state: "NJ", access: "MANUAL", note: "Periscope bso platform: results need a JSF AJAX POST, not reachable by fetch." },
+  { id: "nvepro", name: "NevadaEPro", kind: "generic",
+    url: "https://nevadaepro.com/bso/view/search/external/advancedSearchBid.xhtml",
+    state: "NV", access: "MANUAL", note: "Periscope bso platform: results need a JSF AJAX POST, not reachable by fetch." },
+  { id: "orbuys", name: "OregonBuys", kind: "generic",
+    url: "https://oregonbuys.gov/bso/view/search/external/advancedSearchBid.xhtml",
+    state: "OR", access: "MANUAL", note: "Periscope bso platform: results need a JSF AJAX POST, not reachable by fetch." },
   { id: "inidoa", name: "Indiana IDOA business opportunities", kind: "generic",
     url: "https://www.in.gov/idoa/procurement/current-business-opportunities/", state: "IN" }
 ];
