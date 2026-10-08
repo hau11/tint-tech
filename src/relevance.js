@@ -17,7 +17,7 @@ export const TERM_TO_TYPE = [
   { type: "Solar Control",    re: /solar\s+(\w+\s+)?film|solar control|sun control|heat rejection|glare reduction|uv\s+(\w+\s+)?film|spectrally selective|low-?e film|energy\s+(\w+\s+)?film|window tint|tinting/i },
   { type: "Decorative",       re: /decorative\s+(\w+\s+)?film|etched film|frosted|frost film|sandblast|dusted crystal|manifestation|patterned film|translucent film/i },
   { type: "Privacy",          re: /privacy\s+(\w+\s+)?film|one-?way (mirror )?film|opaque film/i },
-  { type: "Bird Strike",      re: /bird ?strike|bird ?safe|bird deterrent|bird friendly|fritted/i },
+  { type: "Bird Strike",      re: /bird[ -]?strike|bird[ -]?safe|bird deterrent|bird friendly|fritted/i },
   { type: "Anti-Graffiti",    re: /anti-?graffiti|graffiti\s+(\w+\s+)?film|sacrificial film/i },
   { type: "Switchable",       re: /switchable film|smart film|pdlc|electrochromic film/i },
   { type: "Whiteboard",       re: /whiteboard film|dry ?erase film/i },
@@ -45,6 +45,13 @@ const FILM_EXPLICIT = [
   "uv film", "heat rejection film", "glare reduction film",
   "applied film", "surface applied film", "film application",
   "3m fasara", "llumar", "solar gard", "hanita", "madico", "suntek", "huper optik",
+  // Terms below do NOT contain the substring "window film", so the generic
+  // entry above cannot catch them. Anything that does contain it (e.g.
+  // "security window film") is already covered and is not repeated here.
+  "glazing film", "reflective film", "insulating film", "insulating window film",
+  "low emissivity film", "opaque film", "graphics film", "glass graphics",
+  "protective film", "bomb blast film", "blast mitigation film", "forced-entry film",
+  "bird-strike film", "safety/security film", "sun control film",
   "08 87 13", "088713", "08 87 00", "088700"     // CSI: window films
 ];
 
@@ -55,7 +62,16 @@ const GLAZING_SCOPE = [
   "window replacement", "replace windows", "window system", "window systems",
   "fenestration", "aluminum window", "punched window", "exterior window",
   "glass wall", "glass partition", "interior glass", "glass door",
-  "skylight", "clerestory", "atrium glass", "window wall"
+  "skylight", "clerestory", "atrium glass", "window wall",
+  "exterior glazing", "interior glazing", "glass storefront", "aluminum storefront",
+  "glazing replacement", "glass replacement", "window renovation", "window upgrades",
+  "privacy glazing", "decorative glazing",
+  // Security glazing scopes. These are prime security-film territory and were
+  // missing entirely: a courthouse asking for blast-resistant glazing and
+  // forced-entry resistance scored 12 and was hidden as "low".
+  "security glazing", "blast resistant glazing", "blast-resistant glazing",
+  "forced entry resistance", "forced-entry resistance", "attack resistant glazing",
+  "bullet resistant glazing", "ballistic glazing", "impact resistant glazing"
 ];
 
 // A subset of tier 2 that is strong enough ON ITS OWN to be worth a look — a
@@ -65,13 +81,20 @@ const GLAZING_STRONG = [
   "window replacement", "replace windows", "replacement windows",
   "storefront", "store front", "curtain wall", "curtainwall",
   "glazing package", "glazing contractor", "window systems", "window system",
-  "glass partition", "glass wall", "window wall"
+  "glass partition", "glass wall", "window wall",
+  "security glazing", "blast resistant glazing", "blast-resistant glazing",
+  "forced entry resistance", "forced-entry resistance", "attack resistant glazing",
+  "bullet resistant glazing", "ballistic glazing"
 ];
 
 /* ---------- Tier 3: weak context (only counts alongside tier 2) ---------- */
 const SUPPORTING = [
   "energy efficiency", "energy conservation", "solar heat gain", "shgc",
-  "safety glazing", "security glazing", "hurricane protection", "impact resistant",
+  // "safety glazing" stays weak on purpose: it is code-mandated tempered glass
+  // and appears on nearly every job. "security glazing" was promoted to tier 2.
+  "safety glazing", "hurricane protection", "impact resistant",
+  "solar heat gain coefficient", "glare control", "cooling load",
+  "thermal performance", "leed", "bird deterrent",
   "school safety", "hardening", "daylighting", "glare", "uv protection",
   "building envelope", "facade improvement", "tenant improvement"
 ];
@@ -104,15 +127,47 @@ const has = (hay, term) => hay.includes(term);
  * Classify a lead's text for window-film relevance.
  * @returns {{relevance:'high'|'medium'|'low'|'excluded', score:number, reasons:string[], matched:{film:string[],glazing:string[]}}}
  */
-export function classifyFilmRelevance(text) {
+/* ---------- caller-supplied vocabulary ---------- */
+
+/** The built-in lists, exposed so a settings screen can show what it is editing. */
+export const DEFAULT_TERMS = Object.freeze({
+  film: FILM_EXPLICIT, glazing: GLAZING_SCOPE, glazingStrong: GLAZING_STRONG,
+  supporting: SUPPORTING, exclusions: EXCLUSIONS
+});
+
+const clean = list => (Array.isArray(list) ? list : [])
+  .map(t => String(t || "").toLowerCase().trim()).filter(Boolean);
+
+/**
+ * Fold user vocabulary into the built-in lists. Additive per category, plus a
+ * `disabled` list that switches individual terms off wherever they appear.
+ * Pure and total: bad input is ignored rather than throwing, because this runs
+ * inside the scan and a malformed setting must never take discovery down.
+ */
+export function mergeTerms(custom = {}) {
+  const c = custom && typeof custom === "object" ? custom : {};
+  const off = new Set(clean(c.disabled));
+  const merge = (base, extra) =>
+    [...new Set([...base, ...clean(extra)])].filter(t => !off.has(t));
+  return {
+    film: merge(FILM_EXPLICIT, c.film),
+    glazing: merge(GLAZING_SCOPE, c.glazing),
+    glazingStrong: merge(GLAZING_STRONG, c.glazingStrong),
+    supporting: merge(SUPPORTING, c.supporting),
+    exclusions: merge(EXCLUSIONS, c.exclusions)
+  };
+}
+
+export function classifyFilmRelevance(text, custom) {
   const hay = " " + String(text || "").toLowerCase().replace(/\s+/g, " ") + " ";
   if (!hay.trim()) return { relevance: "excluded", score: 0, reasons: ["No text to classify"], filmTypes: [], matched: { film: [], glazing: [] } };
 
-  const filmHits = FILM_EXPLICIT.filter(t => has(hay, t));
-  const glazHits = GLAZING_SCOPE.filter(t => has(hay, t));
-  const strongGlaz = GLAZING_STRONG.filter(t => has(hay, t));
-  const supportHits = SUPPORTING.filter(t => has(hay, t));
-  const exclusionHits = EXCLUSIONS.filter(t => has(hay, t));
+  const terms = custom ? mergeTerms(custom) : DEFAULT_TERMS;
+  const filmHits = terms.film.filter(t => has(hay, t));
+  const glazHits = terms.glazing.filter(t => has(hay, t));
+  const strongGlaz = terms.glazingStrong.filter(t => has(hay, t));
+  const supportHits = terms.supporting.filter(t => has(hay, t));
+  const exclusionHits = terms.exclusions.filter(t => has(hay, t));
 
   // Explicit film language beats exclusions: "blinds and window film" is still
   // a film job. Exclusions only veto leads with no film language of their own.
@@ -160,13 +215,13 @@ export function classifyFilmRelevance(text) {
 }
 
 /** Filter a batch of leads, keeping only what's worth an estimator's attention. */
-export function filterRelevant(leads = [], { minRelevance = "medium" } = {}) {
+export function filterRelevant(leads = [], { minRelevance = "medium", terms = null } = {}) {
   const rank = { high: 3, medium: 2, low: 1, excluded: 0 };
   const floor = rank[minRelevance] ?? 2;
   const kept = [], dropped = [];
   for (const lead of leads) {
     const text = [lead.title, lead.projectNo, lead.description, lead.context].filter(Boolean).join(" ");
-    const c = classifyFilmRelevance(text);
+    const c = classifyFilmRelevance(text, terms);
     const enriched = { ...lead, relevance: c.relevance, relevanceScore: c.score, matchReasons: c.reasons, filmTypes: c.filmTypes };
     (rank[c.relevance] >= floor ? kept : dropped).push(enriched);
   }

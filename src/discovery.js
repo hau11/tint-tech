@@ -276,7 +276,7 @@ export const SOURCES = [
 const today = () => new Date().toISOString().slice(0, 10);
 
 /* ---------------- FMDC structured parser (verified) ---------------- */
-export function parseFmdcHtml(html) {
+export function parseFmdcHtml(html, terms) {
   const $ = cheerio.load(html);
   const leads = [];
   $("table tr").each((_, tr) => {
@@ -298,7 +298,7 @@ export function parseFmdcHtml(html) {
     });
     const resultCell = cells.length >= 5 ? $(cells[4]).text().trim() : "";
     const awarded = /awarded|bid results|rejected/i.test(resultCell);
-    const cls = classifyFilmRelevance(title);
+    const cls = classifyFilmRelevance(title, terms);
     if (cls.relevance === "excluded" || cls.relevance === "low") return;
     leads.push({
       id: uid(), projectNo, title, bidDate, links,
@@ -312,7 +312,7 @@ export function parseFmdcHtml(html) {
 }
 
 /* ---------------- Generic link/text scanner ---------------- */
-export function parseGenericHtml(html, src) {
+export function parseGenericHtml(html, src, terms) {
   // insert whitespace between adjacent tags so table cells don't glue together
   const $ = cheerio.load(html.replace(/></g, "> <"));
   $("script,style,nav,footer,header").remove();
@@ -324,7 +324,7 @@ export function parseGenericHtml(html, src) {
     const hay = text + " " + context;
     if (text.length < 8) return;
     if (/^(home|about|contact|login|register|back|next|menu|search)$/i.test(text)) return;
-    const cls = classifyFilmRelevance(hay);
+    const cls = classifyFilmRelevance(hay, terms);
     if (cls.relevance === "excluded" || cls.relevance === "low") return;
     const relevance = cls.relevance;
     let href = $(a).attr("href") || "";
@@ -365,12 +365,15 @@ const SAM_QUERIES = [
   { title: "safety film" },          // nationwide
   { title: "blast mitigation" },     // nationwide
   { title: "anti-graffiti" },        // nationwide
-  { title: "glazing", state: "MO" }, // regional upsell
-  { title: "glazing", state: "KS" }  // regional upsell — 9 calls/scan total, still under
+  // The glazing upsell query used to run twice, pinned to MO and KS. Merging it
+  // into one nationwide query widens coverage to all 50 states AND costs one
+  // request less, which matters: the comment below is right that the daily
+  // quota is the real ceiling here, not the code.
+  { title: "glazing" },              // nationwide upsell — 8 calls/scan, still under
                                       // the personal SAM.gov key's ~10/day limit above
 ];
 
-async function scanSam(env, store) {
+async function scanSam(env, store, terms) {
   const key = env.SAM_API_KEY;
   if (!key) return { status: "skipped", found: 0, leads: [], error: "No SAM_API_KEY secret set" };
   const meta = (await store.get("meta")) || {};
@@ -394,7 +397,7 @@ async function scanSam(env, store) {
       if (seen.has(op.noticeId)) continue;
       seen.add(op.noticeId);
       const title = op.title || "";
-      const cls = classifyFilmRelevance(title + " " + (op.description || ""));
+      const cls = classifyFilmRelevance(title + " " + (op.description || ""), terms);
       if (cls.relevance === "excluded") continue;
       const relevance = cls.relevance;
       let bidDate = "";
@@ -421,13 +424,13 @@ async function scanSam(env, store) {
 }
 
 /* ---------------- Orchestrator ---------------- */
-async function scanOne(src, env, store) {
+async function scanOne(src, env, store, terms) {
   try {
-    if (src.kind === "sam") return await scanSam(env, store);
+    if (src.kind === "sam") return await scanSam(env, store, terms);
     const res = await fetch(src.url, { headers: src.ua || UA, redirect: "follow" });
     if (!res.ok) return { status: "error", found: 0, leads: [], error: `HTTP ${res.status}` };
     const html = await res.text();
-    const leads = src.kind === "fmdc" ? parseFmdcHtml(html) : parseGenericHtml(html, src);
+    const leads = src.kind === "fmdc" ? parseFmdcHtml(html, terms) : parseGenericHtml(html, src, terms);
     // Heuristic: JS-rendered portals return pages with almost no readable text.
     // Only worth a full DOM parse when the cheap parser found nothing; doing it
     // on every page spent CPU on exactly the sources that already worked.
@@ -491,7 +494,10 @@ export function scanSlice(total, offset, limit) {
 export async function runDiscovery(env, store, { offset = 0, limit = SCAN_BATCH } = {}) {
   const plan = scanSlice(SOURCES.length, offset, limit);
   const batch = SOURCES.slice(plan.start, plan.end);
-  const results = await Promise.all(batch.map(async src => ({ src, ...(await scanOne(src, env, store)) })));
+  // User vocabulary is read once per batch and passed down, so keyword settings
+  // apply to every source without each parser reaching for storage itself.
+  const terms = (await store.get("keywords")) || null;
+  const results = await Promise.all(batch.map(async src => ({ src, ...(await scanOne(src, env, store, terms)) })));
   const discovered = ((await store.get("discovered")) || []).filter(l => !isStale(l));
   const dismissed = (await store.get("dismissed")) || [];
   const opportunities = (await store.get("opportunities")) || [];

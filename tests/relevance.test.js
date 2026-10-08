@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { classifyFilmRelevance, filterRelevant } from "../src/relevance.js";
+import { classifyFilmRelevance, filterRelevant, mergeTerms, DEFAULT_TERMS } from "../src/relevance.js";
 
 const rel = t => classifyFilmRelevance(t).relevance;
 
@@ -192,4 +192,99 @@ test("glazing-only work carries no film type, so it can be separated from real f
 });
 test("excluded leads never carry a film type", () => {
   assert.deepEqual(classifyFilmRelevance("Window blinds and roller shades").filmTypes, []);
+});
+
+/* ---------- security glazing scopes (nationwide expansion, step 1) ---------- */
+
+test("blast-resistant glazing and forced-entry resistance surface as film work", () => {
+  // This scored 12 and was hidden as "low". Blast-resistant glazing and
+  // forced-entry resistance are prime security-film territory, and neither
+  // phrase appeared in any term list.
+  const c = classifyFilmRelevance(
+    "Courthouse Security Upgrades - blast resistant glazing and forced entry resistance at ground floor");
+  assert.equal(c.relevance, "medium");
+  assert.ok(c.score > 12, `score should beat the old 12, got ${c.score}`);
+  assert.ok(c.filmTypes.includes("Security"), "should be tagged as a Security film opportunity");
+  assert.match(c.reasons.join(" "), /blast resistant glazing|forced entry resistance/);
+});
+
+test("safety glazing alone stays weak", () => {
+  // Deliberately NOT promoted with the security terms: safety glazing is
+  // code-mandated tempered glass and appears on nearly every job, so treating
+  // it as a strong signal would flood the board.
+  const c = classifyFilmRelevance("Interior remodel with safety glazing at doors per code");
+  assert.ok(c.score < 30, `safety glazing alone should stay weak, got ${c.score}`);
+});
+
+test("film terms that do not contain the words window film still match", () => {
+  // FILM_EXPLICIT is substring-matched, so anything containing "window film"
+  // is already covered. These are the ones that are not.
+  for (const phrase of ["Provide glazing film to existing vision glass",
+                        "Bird-strike film at atrium glass",
+                        "Install reflective film on south elevation",
+                        "Apply anti-graffiti sacrificial film"]) {
+    assert.equal(classifyFilmRelevance(phrase).relevance, "high", phrase);
+  }
+});
+
+test("the hyphenated bird-strike spelling is typed, not just matched", () => {
+  assert.ok(classifyFilmRelevance("bird-strike film").filmTypes.includes("Bird Strike"));
+  assert.ok(classifyFilmRelevance("bird strike film").filmTypes.includes("Bird Strike"));
+});
+
+test("widening the lists did not let the usual false positives back in", () => {
+  for (const phrase of ["Lawn Mowing Services - grounds maintenance",
+                        "Replace Window Blinds - new blinds and drapery",
+                        "Window cleaning services for county buildings",
+                        "Windshield replacement for fleet vehicles",
+                        "Microsoft Windows license renewal"]) {
+    assert.equal(classifyFilmRelevance(phrase).relevance, "excluded", phrase);
+  }
+});
+
+/* ---------- configurable vocabulary ---------- */
+
+test("a custom term is matched without touching code", () => {
+  const text = "Supply and install heliotrope shielding to the atrium";
+  assert.equal(classifyFilmRelevance(text).relevance, "excluded", "unknown by default");
+  const c = classifyFilmRelevance(text, { film: ["heliotrope shielding"] });
+  assert.equal(c.relevance, "high");
+});
+
+test("a default term can be switched off", () => {
+  // Someone who never sells bird-strike work should be able to stop seeing it.
+  const text = "Bird deterrent film at the atrium";
+  assert.equal(classifyFilmRelevance(text).relevance, "high");
+  const off = classifyFilmRelevance(text, { disabled: ["bird deterrent film"] });
+  assert.notEqual(off.relevance, "high");
+});
+
+test("a custom exclusion suppresses a lead", () => {
+  const text = "Install window film at the stadium";
+  assert.equal(classifyFilmRelevance(text).relevance, "high");
+  const c = classifyFilmRelevance(text, { exclusions: ["stadium"] });
+  // Explicit film language still beats an exclusion, by design, but the
+  // conflict has to be surfaced rather than silently resolved.
+  assert.match(c.reasons.join(" "), /stadium/);
+});
+
+test("merging is normalised, de-duplicated and case-insensitive", () => {
+  const m = mergeTerms({ film: ["  FOO Film  ", "foo film", "", null] });
+  assert.equal(m.film.filter(t => t === "foo film").length, 1, "should appear exactly once");
+  assert.ok(!m.film.includes(""), "blank entries dropped");
+});
+
+test("malformed settings never take the scan down", () => {
+  // This runs inside the scan, so bad stored input must degrade to defaults.
+  for (const junk of [null, undefined, "nope", 42, [], { film: "not-an-array" }, { disabled: 7 }]) {
+    const m = mergeTerms(junk);
+    assert.ok(Array.isArray(m.film) && m.film.length > 0, JSON.stringify(junk));
+  }
+  assert.equal(classifyFilmRelevance("window film", "garbage").relevance, "high");
+});
+
+test("the defaults are exposed so a settings screen can show them", () => {
+  for (const k of ["film", "glazing", "glazingStrong", "supporting", "exclusions"]) {
+    assert.ok(Array.isArray(DEFAULT_TERMS[k]) && DEFAULT_TERMS[k].length, k);
+  }
 });

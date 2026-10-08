@@ -2966,15 +2966,81 @@ function Discovery({onImported}){
     catch(e){ setErr(e.message); }
   };
 
+  /* ---- keyword vocabulary ---- */
+  const KEY_CATS = [
+    ["film","Film terms","Explicit film language. A match here grades the lead High."],
+    ["glazing","Glazing scope","Glass work where film is a plausible sell. Grades Medium."],
+    ["glazingStrong","Strong glazing","Glazing scope strong enough on its own to grade Medium."],
+    ["supporting","Supporting signals","Weak context. Only counts alongside glazing scope."],
+    ["exclusions","Exclusions","Never film work. Blinds, window cleaning, auto glass."],
+    ["disabled","Disabled terms","Built-in terms to switch off, wherever they appear."]
+  ];
+  const [kwOpen,setKwOpen] = useState(false);
+  const [kw,setKw] = useState(null);
+  const [kwCounts,setKwCounts] = useState(null);
+  const [kwMsg,setKwMsg] = useState("");
+  const loadKeywords = async ()=>{
+    try{
+      const r = await api("/discovery/keywords");
+      const custom = r?.custom || {};
+      setKw(Object.fromEntries(KEY_CATS.map(([k])=>[k,(custom[k]||[]).join("\n")])));
+      setKwCounts(Object.fromEntries(KEY_CATS.map(([k])=>[k,(r?.effective?.[k]||[]).length])));
+    }catch(e){ setKwMsg("Could not load keywords: " + e.message); }
+  };
+  const saveKeywords = async ()=>{
+    setKwMsg("Saving…");
+    try{
+      const body = Object.fromEntries(KEY_CATS.map(([k])=>[k,(kw?.[k]||"").split("\n").map(s=>s.trim()).filter(Boolean)]));
+      const r = await api("/discovery/keywords", {method:"PUT", body});
+      setKwCounts(Object.fromEntries(KEY_CATS.map(([k])=>[k,(r?.effective?.[k]||[]).length])));
+      setKwMsg("Saved. The next scan uses these terms.");
+    }catch(e){ setKwMsg("Save failed: " + e.message); }
+  };
+
   return (
     <div>
       <div className="pagehead">
         <div><h1>Discovery Engine</h1><p>Scans public procurement sources for projects that may need film — runs automatically every Monday morning at 6:30</p></div>
-        <button className="btn pri" disabled={scanning} onClick={scan}>
-          {scanning? <Loader2 size={15} style={{animation:"spin 1s linear infinite"}}/> : <Rss size={15}/>}
-          {scanning? "Scanning…" : "Scan now"}
-        </button>
+        <div style={{display:"flex",gap:8}}>
+          <button className="btn" onClick={()=>{ const next=!kwOpen; setKwOpen(next); if(next && !kw) loadKeywords(); }}>
+            {kwOpen ? "Hide keywords" : "Keywords"}
+          </button>
+          <button className="btn pri" disabled={scanning} onClick={scan}>
+            {scanning? <Loader2 size={15} style={{animation:"spin 1s linear infinite"}}/> : <Rss size={15}/>}
+            {scanning? "Scanning…" : "Scan now"}
+          </button>
+        </div>
       </div>
+      {kwOpen && (
+        <div className="card" style={{marginBottom:12,padding:14}}>
+          <div style={{fontWeight:600,marginBottom:4}}>Search vocabulary</div>
+          <div className="muted" style={{fontSize:13,marginBottom:10}}>
+            One term per line. These are <strong>added to</strong> the built-in lists, so leave a box empty
+            to use the defaults alone. Matching is case-insensitive substring. Counts show the
+            effective list size once your terms are merged in.
+          </div>
+          {!kw && <div className="muted">Loading…</div>}
+          {kw && (
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12}}>
+              {KEY_CATS.map(([k,label,help])=>(
+                <div key={k}>
+                  <div style={{fontSize:13,fontWeight:600}}>
+                    {label}{kwCounts? <span className="muted" style={{fontWeight:400}}> · {kwCounts[k]} in use</span> : null}
+                  </div>
+                  <div className="muted" style={{fontSize:12,marginBottom:4}}>{help}</div>
+                  <textarea rows={5} value={kw[k]} spellCheck={false}
+                    onChange={e=>setKw(p=>({...p,[k]:e.target.value}))}
+                    style={{width:"100%",fontFamily:"ui-monospace,monospace",fontSize:12}}/>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{display:"flex",gap:10,alignItems:"center",marginTop:10}}>
+            <button className="btn pri" disabled={!kw} onClick={saveKeywords}>Save vocabulary</button>
+            {kwMsg && <span className="muted" style={{fontSize:13}}>{kwMsg}</span>}
+          </div>
+        </div>
+      )}
       {leads && (()=> {
         const filmLeads = leads.filter(l=>l.relevance==="high");
         const glassLeads = leads.filter(l=>l.relevance!=="high");

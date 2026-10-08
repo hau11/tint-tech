@@ -5,6 +5,7 @@ import PostalMime from "postal-mime";
 import { makeStore, uid } from "./store.js";
 import { scoreOpportunity, blueprintChat, generateProposal } from "./claude.js";
 import { runDiscovery, leadToOpportunity } from "./discovery.js";
+import { DEFAULT_TERMS, mergeTerms } from "./relevance.js";
 import { bluebookToLead } from "./bluebook.js";
 import { buildAuthorizeUrl, exchangeCode, ensureAccessToken, fetchProjectLeads } from "./buildingconnected.js";
 import { integrationsStatus } from "./integrations/registry.js";
@@ -844,6 +845,29 @@ export default {
       // the cache so the next "Scan now" reflects only what the CURRENT
       // classifier finds. It does not touch "dismissed", so leads a person
       // already dismissed by hand stay hidden.
+      // Keyword vocabulary. Lets the term lists be tuned without a deploy,
+      // which matters because what counts as a film signal varies by region
+      // and by how a given board words its postings.
+      if (path === "/api/discovery/keywords" && request.method === "GET") {
+        const custom = (await store.get("keywords")) || {};
+        return json({ custom, defaults: DEFAULT_TERMS, effective: mergeTerms(custom) });
+      }
+      if (path === "/api/discovery/keywords" && request.method === "PUT") {
+        const body = await request.json().catch(() => ({}));
+        const CATEGORIES = ["film", "glazing", "glazingStrong", "supporting", "exclusions", "disabled"];
+        const clean = {};
+        for (const key of CATEGORIES) {
+          if (!Array.isArray(body[key])) continue;
+          // Normalised and de-duplicated on write, and capped, so a paste
+          // accident cannot put thousands of terms in the scan hot path.
+          clean[key] = [...new Set(body[key]
+            .map(t => String(t || "").toLowerCase().trim())
+            .filter(Boolean))].slice(0, 500);
+        }
+        await store.set("keywords", clean);
+        return json({ ok: true, custom: clean, effective: mergeTerms(clean) });
+      }
+
       if (path === "/api/discovery/clear" && request.method === "POST") {
         const discovered = (await store.get("discovered")) || [];
         await store.set("discovered", []);
