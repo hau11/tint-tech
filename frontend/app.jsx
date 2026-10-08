@@ -2911,6 +2911,123 @@ function LeadTester(){
   );
 }
 
+/* ============ DELIVER LEADS ============ */
+// Routing was API-only until now: delivery took a list of customer ids you had
+// to already know. This screen asks the matching engine who fits and shows the
+// reasoning, so the choice is reviewable rather than remembered.
+function DeliverLeads({opps}){
+  const [projectId,setProjectId] = useState("");
+  const [data,setData] = useState(null);
+  const [picked,setPicked] = useState([]);
+  const [exclusivity,setExclusivity] = useState("shared");
+  const [busy,setBusy] = useState(false);
+  const [msg,setMsg] = useState("");
+  const [err,setErr] = useState("");
+
+  const load = async id => {
+    setProjectId(id); setData(null); setPicked([]); setMsg(""); setErr("");
+    if(!id) return;
+    try{
+      const r = await api("/admin/leads/suggest-customers/" + id);
+      setData(r);
+      // Preselect the top match only. Auto-ranking is a recommendation, not a
+      // decision: delivery is billable and the operator confirms it.
+      setPicked(r?.suggested?.length ? [r.suggested[0].customerId] : []);
+    }catch(e){ setErr(e.message); }
+  };
+
+  const toggle = id => setPicked(p => p.includes(id) ? p.filter(x=>x!==id) : [...p, id]);
+
+  const deliver = async ()=>{
+    if(!picked.length) return;
+    setBusy(true); setMsg(""); setErr("");
+    try{
+      const r = await api("/admin/leads/deliver", {method:"POST",
+        body:{ projectId, customerIds: picked, exclusivity }});
+      // Partial failures are reported honestly by the API, so report them here
+      // too rather than flattening the result into a single success message.
+      const ok = (r?.delivered||[]).length, bad = (r?.failed||[]).length;
+      setMsg(`Delivered ${ok} lead(s).` + (bad ? ` ${bad} failed.` : ""));
+      if(bad) setErr((r.failed||[]).map(f=>f.error||JSON.stringify(f)).join(" | "));
+      await load(projectId);
+    }catch(e){ setErr(e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <div>
+      <div className="pagehead">
+        <div><h1>Deliver Leads</h1><p>Pick a project and the matching engine ranks which customers should receive it, and why</p></div>
+      </div>
+
+      <div className="card" style={{padding:14,marginBottom:12}}>
+        <label style={{fontSize:13,fontWeight:600}}>Project</label>
+        <select value={projectId} onChange={e=>load(e.target.value)} style={{width:"100%",marginTop:4}}>
+          <option value="">Select a project…</option>
+          {(opps||[]).map(o=>(
+            <option key={o.id} value={o.id}>{o.name}{o.state ? ` — ${o.state}` : ""}</option>
+          ))}
+        </select>
+      </div>
+
+      {err && <div className="card" style={{padding:12,marginBottom:12,borderLeft:"3px solid var(--bad)"}}>{err}</div>}
+      {msg && <div className="card" style={{padding:12,marginBottom:12,borderLeft:"3px solid var(--good)"}}>{msg}</div>}
+
+      {data && (<>
+        <div className="card" style={{padding:14,marginBottom:12}}>
+          <div style={{fontWeight:600,marginBottom:8}}>
+            Suggested ({data.suggested.length})
+          </div>
+          {!data.suggested.length && (
+            <div className="muted">
+              No customer is eligible for this project. Every one is listed below with the
+              reason, which is usually territory: nobody has {data.project.state || "this state"} in
+              their service states.
+            </div>
+          )}
+          {data.suggested.map(s=>(
+            <label key={s.customerId} style={{display:"flex",gap:10,alignItems:"flex-start",padding:"8px 0",borderTop:"1px solid var(--line)"}}>
+              <input type="checkbox" checked={picked.includes(s.customerId)} onChange={()=>toggle(s.customerId)} style={{marginTop:3}}/>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:600}}>
+                  #{s.rank} {s.company} <span className="muted" style={{fontWeight:400}}>· score {s.score}</span>
+                </div>
+                <div className="muted" style={{fontSize:12}}>{s.reasons.join(" · ")}</div>
+              </div>
+            </label>
+          ))}
+          {Boolean(data.suggested.length) && (
+            <div style={{display:"flex",gap:10,alignItems:"center",marginTop:12}}>
+              <select value={exclusivity} onChange={e=>setExclusivity(e.target.value)}>
+                <option value="shared">Shared</option>
+                <option value="exclusive">Exclusive</option>
+              </select>
+              <button className="btn pri" disabled={busy || !picked.length} onClick={deliver}>
+                {busy ? "Delivering…" : `Deliver to ${picked.length} customer(s)`}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {Boolean(data.excluded.length) && (
+          <div className="card" style={{padding:14}}>
+            <div style={{fontWeight:600,marginBottom:4}}>Not eligible ({data.excluded.length})</div>
+            <div className="muted" style={{fontSize:12,marginBottom:8}}>
+              Shown rather than hidden, so you can see who was considered.
+            </div>
+            {data.excluded.map(s=>(
+              <div key={s.customerId} style={{padding:"6px 0",borderTop:"1px solid var(--line)"}}>
+                <div style={{fontWeight:600}}>{s.company}</div>
+                <div className="muted" style={{fontSize:12}}>{s.blockers.join(" · ")}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </>)}
+    </div>
+  );
+}
+
 /* ============ DISCOVERY ENGINE ============ */
 function Discovery({onImported}){
   const [leads,setLeads] = useState(null);
@@ -3842,6 +3959,7 @@ export default function BidHunter(){
       ["copilot","Blueprint Copilot",Sparkles],
     ]],
     ["Admin", [
+      ["deliver","Deliver Leads",Send],
       ["gcs","Contractors",Building2],
       ["integrations","Integrations",Link2],
       ["health","System Health",RefreshCw],
@@ -3886,6 +4004,7 @@ export default function BidHunter(){
         {view==="search" && <GlobalSearch openOpp={openOpp}/>}
         {view==="health" && <SystemHealth/>}
         {view==="integrations" && <IntegrationsView/>}
+        {view==="deliver" && <DeliverLeads opps={opps}/>}
         {view==="gcs" && <Contractors gcs={gcs} setGcs={updGcs}/>}
       </main>
       {current && (
