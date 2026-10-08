@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildDigest, renderDigestText, renderDigestHtml, REMINDER_DAYS } from "../src/digest.js";
+import { buildDigest, renderDigestText, renderDigestHtml, REMINDER_DAYS, isEmailAddress, sendEmail } from "../src/digest.js";
 
 const NOW = new Date("2026-08-12T07:00:00");
 const iso = days => new Date(Date.UTC(2026,7,12+days)).toISOString().slice(0,10);
@@ -97,4 +97,44 @@ test("subject line summarises the day", () => {
   const d = buildDigest({ projects:[P("a",0), P("b",3)], leads:[L("x")], now:NOW });
   assert.match(d.subject, /1 due TODAY/);
   assert.match(d.subject, /1 new lead/);
+});
+
+/* ---------- recipient validation ---------- */
+
+test("a pasted address with stray whitespace is still usable", () => {
+  // The actual failure: a secret typed at a terminal picked up surrounding
+  // whitespace, and Resend rejected the send with only Invalid to field.
+  assert.equal(isEmailAddress("  info@tinttechkc.com  "), true);
+  assert.equal(isEmailAddress("info@tinttechkc.com\n"), true);
+});
+
+test("the Name <addr> form Resend also accepts is valid", () => {
+  assert.equal(isEmailAddress("Bid Hunter <alerts@tinttechkc.com>"), true);
+});
+
+test("addresses that would bounce are rejected before sending", () => {
+  for (const bad of ["", "   ", "notanemail", "a@b", "a b@c.com", "@tinttechkc.com", "info@", null, undefined]) {
+    assert.equal(isEmailAddress(bad), false, JSON.stringify(bad) + " should not be treated as sendable");
+  }
+});
+
+test("a malformed DIGEST_TO fails with the command that fixes it", async () => {
+  // No fetch stub needed: it must refuse before ever calling the provider.
+  const r = await sendEmail({ RESEND_API_KEY: "re_test" },
+    { to: "nope", subject: "s", html: "<p>h</p>", text: "t" });
+  assert.equal(r.sent, false);
+  assert.match(r.reason, /not a usable email address/i);
+  assert.match(r.reason, /wrangler secret put DIGEST_TO/);
+});
+
+test("several comma-separated recipients are supported and trimmed", async () => {
+  const seen = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (_u, o) => { seen.push(JSON.parse(o.body)); return { ok: true, json: async () => ({ id: "x" }) }; };
+  try {
+    const r = await sendEmail({ RESEND_API_KEY: "re_test" },
+      { to: " a@x.com , b@y.com ", subject: "s", html: "<p>h</p>", text: "t" });
+    assert.equal(r.sent, true);
+    assert.deepEqual(seen[0].to, ["a@x.com", "b@y.com"]);
+  } finally { globalThis.fetch = realFetch; }
 });

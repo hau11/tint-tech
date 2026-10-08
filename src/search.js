@@ -112,10 +112,16 @@ export function summarizeHealth(checks = {}) {
       : "Set BC_CLIENT_ID/BC_CLIENT_SECRET, then tap Connect BuildingConnected (see DEPLOY.md step L).");
   add("Login protection", checks.passwordSet ? "Healthy" : "Warning",
     checks.passwordSet ? "Password required" : "APP_PASSWORD is not set — anyone with the URL can open this app.");
-  add("Morning email digest", checks.digest ? "Healthy" : "Not configured",
-    checks.digest
-      ? `Sends to ${checks.digestTo}${checks.lastDigest ? ` · last sent ${checks.lastDigest.slice(0, 10)}` : ""}`
-      : "Set RESEND_API_KEY and DIGEST_TO to get the brief by email (see DEPLOY.md step J).");
+  // Set but malformed is its own state. Reporting it Healthy while every send
+  // fails at the provider is the kind of lie that makes this screen useless.
+  const digestBroken = checks.digest && checks.digestToValid === false;
+  add("Morning email digest",
+    digestBroken ? "Warning" : checks.digest ? "Healthy" : "Not configured",
+    digestBroken
+      ? `DIGEST_TO is not a usable address. Re-set it with: npx wrangler secret put DIGEST_TO`
+      : checks.digest
+        ? `Sends to ${checks.digestTo}${checks.lastDigest ? ` · last sent ${checks.lastDigest.slice(0, 10)}` : ""}`
+        : "Set RESEND_API_KEY and DIGEST_TO to get the brief by email (see DEPLOY.md step J).");
   add("Nightly cron", checks.cron ? "Healthy" : "Warning",
     checks.cron ? "Scheduled 6:30 AM Central" : "No cron trigger configured.");
 

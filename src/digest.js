@@ -212,15 +212,39 @@ export function renderDigestHtml(d, appUrl = "") {
 /* ============================================================
    SENDING (optional provider)
    ============================================================ */
+/**
+ * True for a bare address or the "Name <addr>" form Resend also accepts.
+ * Deliberately strict about the domain: a@b passes a naive check but is not
+ * deliverable, and finding that out from a bounced morning brief is worse
+ * than finding out here.
+ */
+export function isEmailAddress(value) {
+  const s = String(value || "").trim();
+  const named = s.match(/^[^<>]*<([^<>\s]+)>$/);
+  const addr = named ? named[1] : s;
+  return /^[^\s@,]+@[^\s@,.]+(\.[^\s@,.]+)+$/.test(addr);
+}
+
 export async function sendEmail(env, { to, subject, html, text }) {
   const key = env.RESEND_API_KEY;
   if (!key) return { sent: false, reason: "No RESEND_API_KEY configured — digest generated but not emailed." };
-  if (!to) return { sent: false, reason: "No DIGEST_TO address configured." };
+  // A secret typed or pasted at a terminal very often carries a trailing space
+  // or newline. Resend rejects the whole request for that with a format error
+  // that never says which part was wrong, so clean and check it here where we
+  // can name the problem and the command that fixes it.
+  const recipients = String(to || "").split(",").map(a => a.trim()).filter(Boolean);
+  if (!recipients.length) return { sent: false, reason: "No DIGEST_TO address configured." };
+  const bad = recipients.filter(a => !isEmailAddress(a));
+  if (bad.length) {
+    return { sent: false, reason: `DIGEST_TO is not a usable email address: ${bad.join(", ")}. `
+      + `Use name@example.com, or Name <name@example.com>. `
+      + `Re-set it with: npx wrangler secret put DIGEST_TO` };
+  }
   const from = env.DIGEST_FROM || "Bid Hunter <onboarding@resend.dev>";
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-    body: JSON.stringify({ from, to: [to], subject, html, text })
+    body: JSON.stringify({ from, to: recipients, subject, html, text })
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { sent: false, reason: data.message || `Email provider returned HTTP ${res.status}` };

@@ -16,7 +16,7 @@ import {
 } from "./analytics.js";
 import { scoreRecord, buildSearchResult, rankSearchResults, summarizeHealth, toCsv } from "./search.js";
 import { buildChecklist, CHECKLIST_ITEMS } from "./checklist.js";
-import { buildDigest, renderDigestText, renderDigestHtml, sendEmail } from "./digest.js";
+import { buildDigest, renderDigestText, renderDigestHtml, sendEmail, isEmailAddress } from "./digest.js";
 import * as auth from "./auth.js";
 // Aliased to leadFlow: `leads` is used as a local array name in the digest
 // routes and the cron, and shadowing it would put the module in a temporal
@@ -1863,6 +1863,9 @@ export default {
             cron: true,
             digest: Boolean(env.RESEND_API_KEY && env.DIGEST_TO),
             digestTo: env.DIGEST_TO || null,
+            // Configured is not the same as working: a DIGEST_TO with a stray
+            // space reads as set but every send fails at the provider.
+            digestToValid: isEmailAddress(env.DIGEST_TO),
             lastDigest: meta.lastDigestAt || null
           }));
         }
