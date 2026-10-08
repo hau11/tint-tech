@@ -42,7 +42,7 @@ const SEED = {
   proposals: {},
   discovered: [],
   dismissed: [],
-  meta: { samLastRun: null, installedAt: today() }
+  meta: { samLastRun: null, lastDiscovery: null, installedAt: today() }
 };
 
 let initialized = false;

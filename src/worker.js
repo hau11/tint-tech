@@ -1850,7 +1850,11 @@ export default {
             claudeKey: Boolean(env.ANTHROPIC_API_KEY),
             samKey: Boolean(env.SAM_API_KEY),
             samLastRun: meta.samLastRun || null,
-            lastDiscovery: discovered[0]?.foundAt || null,
+            // The recorded scan time, not an inference from whether any lead
+            // happens to be stored. leadCount is reported separately so the
+            // two questions stay distinct.
+            lastDiscovery: meta.lastDiscovery || null,
+            leadCount: discovered.length,
             bluebookLastReceived: meta.bluebookLastReceived || null,
             bcConnected: Boolean(await store.get("bc_tokens")),
             bcLastSync: meta.bcLastSync || null,

@@ -69,6 +69,27 @@ test("missing keys give the exact command to fix them", () => {
   assert.match(h.items.find(i => /SAM/.test(i.name)).detail, /wrangler secret put SAM_API_KEY/);
 });
 
+test("a scan that ran and found nothing is healthy, not a warning", () => {
+  // Health used to infer the last scan from the first stored lead, so a scan
+  // that legitimately found nothing reported No scan recorded yet and told you
+  // to scan again, forever. Film-specific public bids are rare, so zero leads
+  // is an ordinary outcome and flagging it trains you to ignore this screen.
+  const h = summarizeHealth({ database: true, r2: true, claudeKey: true, passwordSet: true,
+    cron: true, lastDiscovery: "2026-10-07T12:00:00Z", leadCount: 0 });
+  const item = h.items.find(i => i.name === "Discovery scan");
+  assert.equal(item.status, "Healthy");
+  assert.match(item.detail, /2026-10-07/, "should report when it actually ran");
+  assert.match(item.detail, /0 lead/, "and say plainly that it found nothing");
+});
+
+test("a discovery scan that has never run is still a warning", () => {
+  const h = summarizeHealth({ database: true, r2: true, claudeKey: true, passwordSet: true,
+    cron: true, lastDiscovery: null });
+  const item = h.items.find(i => i.name === "Discovery scan");
+  assert.equal(item.status, "Warning");
+  assert.match(item.detail, /no scan has run/i);
+});
+
 /* ---------- CSV ---------- */
 test("csv quotes commas, quotes and newlines", () => {
   const csv = toCsv([{ a: 'He said "hi"', b: "x,y", c: "line1\nline2" }]);

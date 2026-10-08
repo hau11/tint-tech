@@ -92,8 +92,13 @@ export function summarizeHealth(checks = {}) {
   add("SAM.gov federal feed", checks.samKey ? "Healthy" : "Not configured",
     checks.samKey ? (checks.samLastRun ? `Last scan ${checks.samLastRun.slice(0, 10)}` : "Key set, not scanned yet")
                   : "Run: npx wrangler secret put SAM_API_KEY");
+  // A scan that ran and found nothing is healthy. Film-specific public bids
+  // are rare, so reporting zero leads as a problem trains you to ignore this
+  // screen. Only never having run is worth a warning.
   add("Discovery scan", checks.lastDiscovery ? "Healthy" : "Warning",
-    checks.lastDiscovery ? `Last run ${checks.lastDiscovery}` : "No scan recorded yet — tap Scan now on Discovery.");
+    checks.lastDiscovery
+      ? `Last run ${String(checks.lastDiscovery).slice(0, 10)} · ${checks.leadCount ?? 0} lead(s) pending`
+      : "No scan has run yet — tap Scan now on Discovery.");
   add("Blue Book webhook", checks.bluebookLastReceived ? "Healthy" : "Not configured",
     checks.bluebookLastReceived
       ? `Last notification received ${checks.bluebookLastReceived.slice(0, 10)}`

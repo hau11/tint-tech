@@ -512,6 +512,14 @@ export async function runDiscovery(env, store, { offset = 0, limit = SCAN_BATCH 
   }
   const updated = [...fresh, ...discovered].slice(0, 200);
   await store.set("discovered", updated);
+  // Record that a scan actually ran. System Health used to infer this from
+  // the first stored lead, which meant a scan that legitimately found nothing
+  // reported "No scan recorded yet" and told you to scan again -- forever.
+  // Film-specific public bids are genuinely rare, so zero leads is a normal
+  // outcome, not evidence the scan never happened.
+  const scanMeta = (await store.get("meta")) || {};
+  scanMeta.lastDiscovery = new Date().toISOString();
+  await store.set("meta", scanMeta);
   return {
     sources: results.map(r => ({ id: r.src.id, name: r.src.name, status: r.status, found: r.found, error: r.error || null })),
     new: fresh.length,
