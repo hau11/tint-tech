@@ -232,7 +232,13 @@ export async function sendEmail(env, { to, subject, html, text }) {
   // or newline. Resend rejects the whole request for that with a format error
   // that never says which part was wrong, so clean and check it here where we
   // can name the problem and the command that fixes it.
-  const recipients = String(to || "").split(",").map(a => a.trim()).filter(Boolean);
+  // A pasted mailto: link is a realistic slip and unambiguous in meaning, so
+  // strip the scheme rather than reject the address over it. Resend would have
+  // refused it while our own check passed, which is the worst combination:
+  // health reporting fine while every send fails.
+  const recipients = String(to || "").split(",")
+    .map(a => a.trim().replace(/^mailto:/i, "").trim())
+    .filter(Boolean);
   if (!recipients.length) return { sent: false, reason: "No DIGEST_TO address configured." };
   const bad = recipients.filter(a => !isEmailAddress(a));
   if (bad.length) {

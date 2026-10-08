@@ -138,3 +138,19 @@ test("several comma-separated recipients are supported and trimmed", async () =>
     assert.deepEqual(seen[0].to, ["a@x.com", "b@y.com"]);
   } finally { globalThis.fetch = realFetch; }
 });
+
+test("a pasted mailto: link is accepted, not silently broken", () => {
+  // isEmailAddress passes "mailto:a@b.com" because it contains no spaces, @ or
+  // comma, but Resend rejects it. That combination is the worst one: health
+  // says fine while every send fails. sendEmail strips the scheme.
+  const seen = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (_u, o) => { seen.push(JSON.parse(o.body)); return { ok: true, json: async () => ({ id: "x" }) }; };
+  return sendEmail({ RESEND_API_KEY: "re_test" },
+    { to: "mailto:info@tinttechkc.com", subject: "s", html: "<p>h</p>", text: "t" })
+    .then(r => {
+      assert.equal(r.sent, true);
+      assert.deepEqual(seen[0].to, ["info@tinttechkc.com"]);
+    })
+    .finally(() => { globalThis.fetch = realFetch; });
+});
