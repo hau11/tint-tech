@@ -2934,7 +2934,7 @@ function Discovery({onImported}){
     const seen = []; let newLeads = 0; let offset = 0; let guard = 0;
     try{
       for(;;){
-        const r = await api("/discovery/run", {method:"POST", body:{offset}});
+        const r = await api("/discovery/run", {method:"POST", body:{offset, states:geoStates, regions:geoRegions}});
         seen.push(...(Array.isArray(r?.sources)?r.sources:[]));
         newLeads += Number(r?.new) || 0;
         if(Array.isArray(r?.leads)) setLeads(r.leads);
@@ -2975,6 +2975,21 @@ function Discovery({onImported}){
     ["exclusions","Exclusions","Never film work. Blinds, window cleaning, auto glass."],
     ["disabled","Disabled terms","Built-in terms to switch off, wherever they appear."]
   ];
+  /* ---- geography ---- */
+  // Default is the entire United States: empty filters mean no restriction,
+  // which is also what the worker treats as nationwide.
+  const REGION_NAMES = ["Northeast","Midwest","South","West"];
+  const [geoRegions,setGeoRegions] = useState([]);
+  const [geoStates,setGeoStates] = useState([]);
+  const [srcOpen,setSrcOpen] = useState(false);
+  const [srcData,setSrcData] = useState(null);
+  const loadSources = async ()=>{
+    try{ setSrcData(await api("/discovery/sources")); }
+    catch(e){ setErr("Could not load sources: " + e.message); }
+  };
+  const toggleRegion = r => setGeoRegions(p => p.includes(r) ? p.filter(x=>x!==r) : [...p, r]);
+  const nationwide = geoRegions.length === 0 && geoStates.length === 0;
+
   const [kwOpen,setKwOpen] = useState(false);
   const [kw,setKw] = useState(null);
   const [kwCounts,setKwCounts] = useState(null);
@@ -3011,6 +3026,56 @@ function Discovery({onImported}){
           </button>
         </div>
       </div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
+        <span className="muted" style={{fontSize:13}}>Search area:</span>
+        <button className="chip" onClick={()=>{setGeoRegions([]);setGeoStates([]);}}
+          style={nationwide?{background:"var(--accent)",color:"#fff",borderColor:"var(--accent)"}:{}}>
+          United States
+        </button>
+        {REGION_NAMES.map(r=>(
+          <button key={r} className="chip" onClick={()=>toggleRegion(r)}
+            style={geoRegions.includes(r)?{background:"var(--accent)",color:"#fff",borderColor:"var(--accent)"}:{}}>
+            {r}
+          </button>
+        ))}
+        <button className="chip" onClick={()=>{ const next=!srcOpen; setSrcOpen(next); if(next && !srcData) loadSources(); }}>
+          {srcOpen ? "Hide sources" : "Sources"}
+        </button>
+      </div>
+      {srcOpen && (
+        <div className="card" style={{marginBottom:12,padding:14}}>
+          {!srcData && <div className="muted">Loading…</div>}
+          {srcData && (<>
+            <div style={{fontWeight:600,marginBottom:4}}>
+              {srcData.automatable} of {srcData.total} sources are searched automatically
+            </div>
+            <div className="muted" style={{fontSize:13,marginBottom:10}}>
+              Only sources marked FREE are scanned. Anything needing an account or payment is
+              listed but never counted as searched. <strong>Last OK</strong> is the last time a
+              source actually answered, so a board that has been dead for months cannot look
+              current just because the scan tried it again today.
+            </div>
+            <div style={{maxHeight:320,overflow:"auto"}}>
+              <table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
+                <thead><tr style={{textAlign:"left"}}>
+                  <th>Source</th><th>State</th><th>Access</th><th>Last status</th><th>Last OK</th>
+                </tr></thead>
+                <tbody>
+                  {srcData.sources.map(s=>(
+                    <tr key={s.id} style={{borderTop:"1px solid var(--line)"}}>
+                      <td>{s.name}</td>
+                      <td>{s.state || s.scope}</td>
+                      <td>{s.access}</td>
+                      <td>{s.health?.lastStatus || <span className="muted">never checked</span>}</td>
+                      <td>{s.health?.lastSuccess ? s.health.lastSuccess.slice(0,10) : <span className="muted">never</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>)}
+        </div>
+      )}
       {kwOpen && (
         <div className="card" style={{marginBottom:12,padding:14}}>
           <div style={{fontWeight:600,marginBottom:4}}>Search vocabulary</div>

@@ -273,6 +273,77 @@ export const SOURCES = [
     url: "https://procurement.ku.edu/kuother-bid-opportunities", state: "KS" }
 ];
 
+/* ================= SOURCE REGISTRY =================
+   Everything below turns the flat list above into something that can grow to
+   national coverage without rewriting the scanner. Entries stay terse: the
+   defaults here describe what the existing 89 sources already are (free,
+   public, plain HTML), so only the exceptions need spelling out.
+   ================================================== */
+
+/** Census regions, so a user can say Midwest without ticking twelve boxes. */
+export const REGIONS = {
+  Northeast: ["CT","ME","MA","NH","NJ","NY","PA","RI","VT"],
+  Midwest:   ["IA","IL","IN","KS","MI","MN","MO","ND","NE","OH","SD","WI"],
+  South:     ["AL","AR","DC","DE","FL","GA","KY","LA","MD","MS","NC","OK","SC","TN","TX","VA","WV"],
+  West:      ["AK","AZ","CA","CO","HI","ID","MT","NM","NV","OR","UT","WA","WY"]
+};
+
+export function regionOf(state) {
+  const s = String(state || "").toUpperCase();
+  for (const [name, members] of Object.entries(REGIONS)) if (members.includes(s)) return name;
+  return null;
+}
+
+/**
+ * How reachable a source actually is. The point of recording this is honesty:
+ * the app must never imply it searched somewhere it cannot reach. Anything
+ * beyond FREE is not scanned automatically and is surfaced for manual search.
+ */
+export const ACCESS = ["FREE", "FREE_TO_SEARCH", "FREE_WITH_ACCOUNT", "FREEMIUM", "PAID", "UNKNOWN"];
+
+/** Fill in the defaults the terse entries above leave implicit. */
+export function normalizeSource(src = {}) {
+  const state = src.state || null;
+  return {
+    platform: "html",      // which adapter reads it; html = fetch and parse
+    access: "FREE",        // every current source is a public board, no login
+    enabled: true,
+    note: null,
+    ...src,
+    state,
+    scope: src.scope || (src.kind === "sam" ? "federal" : state ? "state" : "unknown"),
+    region: src.kind === "sam" ? "National" : regionOf(state)
+  };
+}
+
+/** The whole registry, normalized. */
+export function sourceRegistry() {
+  return SOURCES.map(normalizeSource);
+}
+
+/**
+ * Pick the sources a scan should cover. Pure, so the geography rules can be
+ * tested without touching the network.
+ *
+ * No filter means the entire United States, which is the default on purpose.
+ * Federal sources are always included unless explicitly excluded: SAM.gov
+ * covers every state, so dropping it when someone filters to one state would
+ * silently lose the best nationwide feed.
+ */
+export function selectSources({ states = null, regions = null, includeFederal = true, onlyAutomatable = true } = {}) {
+  const wanted = new Set();
+  for (const s of states || []) if (s) wanted.add(String(s).toUpperCase());
+  for (const r of regions || []) for (const s of (REGIONS[r] || [])) wanted.add(s);
+
+  return sourceRegistry().filter(src => {
+    if (!src.enabled) return false;
+    if (onlyAutomatable && src.access !== "FREE") return false;
+    if (src.scope === "federal") return includeFederal;
+    if (!wanted.size) return true;                  // no filter = all of the US
+    return src.state && wanted.has(src.state.toUpperCase());
+  });
+}
+
 const today = () => new Date().toISOString().slice(0, 10);
 
 /* ---------------- FMDC structured parser (verified) ---------------- */
@@ -491,9 +562,13 @@ export function scanSlice(total, offset, limit) {
   return { start, end, nextOffset: end, done: end >= t, total: t };
 }
 
-export async function runDiscovery(env, store, { offset = 0, limit = SCAN_BATCH } = {}) {
-  const plan = scanSlice(SOURCES.length, offset, limit);
-  const batch = SOURCES.slice(plan.start, plan.end);
+export async function runDiscovery(env, store, { offset = 0, limit = SCAN_BATCH, states = null, regions = null } = {}) {
+  // Geography is applied BEFORE slicing, so the cursor walks the selected set
+  // rather than the whole registry. Filtering after slicing would make most
+  // batches empty and the scan appear to stall.
+  const selected = selectSources({ states, regions });
+  const plan = scanSlice(selected.length, offset, limit);
+  const batch = selected.slice(plan.start, plan.end);
   // User vocabulary is read once per batch and passed down, so keyword settings
   // apply to every source without each parser reaching for storage itself.
   const terms = (await store.get("keywords")) || null;
@@ -526,6 +601,26 @@ export async function runDiscovery(env, store, { offset = 0, limit = SCAN_BATCH 
   const scanMeta = (await store.get("meta")) || {};
   scanMeta.lastDiscovery = new Date().toISOString();
   await store.set("meta", scanMeta);
+
+  // Per-source health. lastSuccess only moves when a source actually answered,
+  // so a board that has been dead for months cannot keep looking current just
+  // because the scan tried it again this morning.
+  const health = (await store.get("sourceHealth")) || {};
+  const checkedAt = new Date().toISOString();
+  for (const r of results) {
+    const prev = health[r.src.id] || {};
+    health[r.src.id] = {
+      ...prev,
+      name: r.src.name,
+      state: r.src.state || null,
+      lastChecked: checkedAt,
+      lastStatus: r.status,
+      lastError: r.error || null,
+      lastFound: r.found,
+      lastSuccess: r.status === "ok" ? checkedAt : (prev.lastSuccess || null)
+    };
+  }
+  await store.set("sourceHealth", health);
   return {
     sources: results.map(r => ({ id: r.src.id, name: r.src.name, status: r.status, found: r.found, error: r.error || null })),
     new: fresh.length,
@@ -533,6 +628,7 @@ export async function runDiscovery(env, store, { offset = 0, limit = SCAN_BATCH 
     offset: plan.start,
     nextOffset: plan.nextOffset,
     total: plan.total,
+    selected: selected.length,
     done: plan.done
   };
 }

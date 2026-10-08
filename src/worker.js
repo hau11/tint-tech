@@ -4,7 +4,7 @@
 import PostalMime from "postal-mime";
 import { makeStore, uid } from "./store.js";
 import { scoreOpportunity, blueprintChat, generateProposal } from "./claude.js";
-import { runDiscovery, leadToOpportunity } from "./discovery.js";
+import { runDiscovery, leadToOpportunity, sourceRegistry, selectSources, REGIONS } from "./discovery.js";
 import { DEFAULT_TERMS, mergeTerms } from "./relevance.js";
 import { bluebookToLead } from "./bluebook.js";
 import { buildAuthorizeUrl, exchangeCode, ensureAccessToken, fetchProjectLeads } from "./buildingconnected.js";
@@ -813,7 +813,7 @@ export default {
       // hand-crafted request cannot widen the batch back past the cap.
       if (path === "/api/discovery/run" && request.method === "POST") {
         const body = await request.json().catch(() => ({}));
-        return json(await runDiscovery(env, store, { offset: body.offset, limit: body.limit }));
+        return json(await runDiscovery(env, store, { offset: body.offset, limit: body.limit, states: body.states, regions: body.regions }));
       }
       m = path.match(/^\/api\/discovery\/import\/([\w-]+)$/);
       if (m && request.method === "POST") {
@@ -845,6 +845,24 @@ export default {
       // the cache so the next "Scan now" reflects only what the CURRENT
       // classifier finds. It does not touch "dismissed", so leads a person
       // already dismissed by hand stay hidden.
+      // The source registry, joined to live health. This is what keeps the app
+      // honest: a source is only claimed as searched if it actually answered,
+      // and lastSuccess shows when that last happened.
+      if (path === "/api/discovery/sources" && request.method === "GET") {
+        const health = (await store.get("sourceHealth")) || {};
+        const sources = sourceRegistry().map(s => ({ ...s, health: health[s.id] || null }));
+        const byState = {};
+        for (const s of sources) {
+          const k = s.state || s.scope;
+          byState[k] = (byState[k] || 0) + 1;
+        }
+        return json({
+          sources, regions: REGIONS, byState,
+          total: sources.length,
+          automatable: selectSources({}).length
+        });
+      }
+
       // Keyword vocabulary. Lets the term lists be tuned without a deploy,
       // which matters because what counts as a film signal varies by region
       // and by how a given board words its postings.

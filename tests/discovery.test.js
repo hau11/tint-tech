@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SOURCES, SCAN_BATCH, scanSlice } from "../src/discovery.js";
+import { SOURCES, SCAN_BATCH, scanSlice, REGIONS, regionOf, normalizeSource, sourceRegistry, selectSources } from "../src/discovery.js";
 
 /* The scan is batched because Cloudflare caps one Worker invocation at 50
    subrequests on the free plan. Scanning all 89 sources at once asked for
@@ -58,4 +58,71 @@ test("an empty source list is immediately done", () => {
   const p = scanSlice(0, 0, SCAN_BATCH);
   assert.equal(p.done, true);
   assert.equal(p.end, 0);
+});
+
+/* ---------- source registry + geography ---------- */
+
+test("every state belongs to exactly one region", () => {
+  const seen = new Map();
+  for (const [region, members] of Object.entries(REGIONS)) {
+    for (const st of members) {
+      assert.ok(!seen.has(st), `${st} is in both ${seen.get(st)} and ${region}`);
+      seen.set(st, region);
+    }
+  }
+  // 50 states plus DC. A missing state would silently drop its sources from
+  // every region filter.
+  assert.equal(seen.size, 51, `expected 51 entries, got ${seen.size}`);
+  assert.equal(regionOf("MO"), "Midwest");
+  assert.equal(regionOf("ks"), "Midwest", "should not be case sensitive");
+  assert.equal(regionOf("ZZ"), null);
+});
+
+test("terse source entries get sensible defaults", () => {
+  const s = normalizeSource({ id: "x", name: "X", kind: "generic", url: "https://e.test", state: "TX" });
+  assert.equal(s.access, "FREE");
+  assert.equal(s.platform, "html");
+  assert.equal(s.enabled, true);
+  assert.equal(s.scope, "state");
+  assert.equal(s.region, "South");
+  // An explicit value must win over the default, or exceptions cannot be set.
+  assert.equal(normalizeSource({ access: "PAID" }).access, "PAID");
+  assert.equal(normalizeSource({ kind: "sam" }).scope, "federal");
+});
+
+test("no geography filter means the entire United States", () => {
+  assert.equal(selectSources({}).length, sourceRegistry().filter(s => s.access === "FREE").length);
+});
+
+test("filtering to a state keeps that state plus the federal feed", () => {
+  const mo = selectSources({ states: ["MO"] });
+  assert.ok(mo.length > 0);
+  for (const s of mo) {
+    assert.ok(s.scope === "federal" || s.state === "MO", `${s.id} is ${s.state}, not MO`);
+  }
+  // SAM.gov covers every state, so dropping it on a state filter would lose
+  // the best nationwide feed exactly when someone narrows the search.
+  assert.ok(mo.some(s => s.scope === "federal"), "federal must survive a state filter");
+});
+
+test("a region filter expands to its states", () => {
+  const midwest = selectSources({ regions: ["Midwest"] });
+  const both = selectSources({ states: REGIONS.Midwest });
+  assert.equal(midwest.length, both.length);
+  const west = selectSources({ regions: ["West"] });
+  // Nothing but the federal feed is in the West yet; that is the honest
+  // current state of coverage, not a bug.
+  assert.ok(west.every(s => s.scope === "federal" || REGIONS.West.includes(s.state)));
+});
+
+test("only automatable sources are scanned", () => {
+  // Anything that needs an account or payment must never be counted as
+  // searched. selectSources is the chokepoint that enforces it.
+  for (const s of selectSources({})) assert.equal(s.access, "FREE", s.id);
+});
+
+test("case and junk in a state filter do not silently drop sources", () => {
+  assert.equal(selectSources({ states: ["mo"] }).length, selectSources({ states: ["MO"] }).length);
+  const junk = selectSources({ states: ["ZZ"] });
+  assert.ok(junk.every(s => s.scope === "federal"), "an unknown state should match no local sources");
 });
