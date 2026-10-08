@@ -4,7 +4,7 @@
   "description": "Bid Hunter \u2014 commercial construction lead intelligence for window film contractors",
   "main": "index.js",
   "scripts": {
-    "test": "node --test tests/engines.test.js tests/analyze.test.js tests/addendum.test.js tests/relevance.test.js tests/documents.test.js tests/analytics.test.js tests/search.test.js tests/checklist.test.js tests/digest.test.js tests/early.test.js tests/hidden.test.js tests/pursuit.test.js tests/intel.test.js tests/market.test.js tests/discovery.test.js tests/bluebook.test.js tests/buildingconnected.test.js tests/auth.test.js tests/leads.test.js tests/webhooks.test.js",
+    "test": "node --test tests/engines.test.js tests/analyze.test.js tests/addendum.test.js tests/relevance.test.js tests/documents.test.js tests/analytics.test.js tests/search.test.js tests/checklist.test.js tests/digest.test.js tests/early.test.js tests/hidden.test.js tests/pursuit.test.js tests/intel.test.js tests/market.test.js tests/discovery.test.js tests/bluebook.test.js tests/buildingconnected.test.js tests/auth.test.js tests/matching.test.js tests/leads.test.js tests/webhooks.test.js",
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "build": "esbuild frontend/app.jsx --bundle --minify --jsx=automatic --outfile=public/app.js && esbuild frontend/portal.jsx --bundle --minify --jsx=automatic --outfile=public/portal.js && node -e \"require('fs').copyFileSync('node_modules/pdfjs-dist/build/pdf.worker.min.mjs','public/pdf.worker.min.mjs')\"",

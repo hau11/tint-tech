@@ -6,6 +6,7 @@ import { makeStore, uid } from "./store.js";
 import { scoreOpportunity, blueprintChat, generateProposal } from "./claude.js";
 import { runDiscovery, leadToOpportunity, sourceRegistry, selectSources, REGIONS, coverageByRegion } from "./discovery.js";
 import { DEFAULT_TERMS, mergeTerms } from "./relevance.js";
+import { matchCustomers } from "./matching.js";
 import { bluebookToLead } from "./bluebook.js";
 import { buildAuthorizeUrl, exchangeCode, ensureAccessToken, fetchProjectLeads } from "./buildingconnected.js";
 import { integrationsStatus } from "./integrations/registry.js";
@@ -474,6 +475,15 @@ async function handlePortalRoutes({ path, request, env, db, actor }) {
 /* ============================================================
    Admin lead management + attribution.
    ============================================================ */
+// Film scope for routing. score_json is the only place the classifier output
+// is persisted and it is TEXT, so a malformed row must not break delivery.
+function safeFilmTypes(project) {
+  try {
+    const parsed = JSON.parse(project.score_json || "{}");
+    return Array.isArray(parsed.filmTypes) ? parsed.filmTypes : [];
+  } catch { return []; }
+}
+
 async function handleLeadAdmin({ path, request, db, actor }) {
   const actorLabel = actor.kind === "legacy-admin" ? "operator" : (actor.userId || "admin");
 
@@ -491,6 +501,27 @@ async function handleLeadAdmin({ path, request, db, actor }) {
     if (q) { sql += " AND (l.lead_id LIKE ? OR p.name LIKE ? OR c.company_name LIKE ?)"; binds.push(`%${q}%`, `%${q}%`, `%${q}%`); }
     sql += " ORDER BY l.delivered_at DESC LIMIT 500";
     return json(await db.all(sql, ...binds));
+  }
+
+  // Which customers should get this project, ranked, with the reasoning.
+  // Ineligible customers come back too, carrying their blockers, so the
+  // operator sees who was considered rather than wondering who vanished.
+  let sm = path.match(/^\/api\/admin\/leads\/suggest-customers\/([\w-]+)$/);
+  if (sm && request.method === "GET") {
+    const project = await db.first("SELECT * FROM projects WHERE id = ?", sm[1]);
+    if (!project) return json({ error: "Project not found" }, 404);
+    const customers = await db.all("SELECT * FROM customers");
+    const existing = await db.all("SELECT customer_id FROM leads WHERE project_id = ?", sm[1]);
+    const ranked = matchCustomers(
+      { ...project, filmTypes: safeFilmTypes(project) },
+      customers || [],
+      { alreadyDelivered: (existing || []).map(r => r.customer_id) }
+    );
+    return json({
+      project: { id: project.id, name: project.name, state: project.state },
+      suggested: ranked.filter(r => r.eligible),
+      excluded: ranked.filter(r => !r.eligible)
+    });
   }
 
   // Deliver a project to one or more customers.
