@@ -570,6 +570,7 @@ async function scanSam(env, store, terms) {
   const fmt = d => `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
   const to = new Date(); const from = new Date(Date.now() - 60 * 86400000);
   const leads = []; const seen = new Set();
+  let spent = 0, stoppedAfter = null, stopReason = null;
   for (const q of queries) {
 // A query is either a title search or a NAICS sweep, never both.
     const filter = q.ncode
@@ -580,8 +581,19 @@ async function scanSam(env, store, terms) {
     const res = await fetch(url, { headers: UA });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      throw new Error(`SAM.gov HTTP ${res.status}${/RATE|LIMIT|exceeded/i.test(body) ? " (daily rate limit hit - resets at midnight ET)" : ""}`);
+      const limited = res.status === 429 || /RATE|LIMIT|exceeded/i.test(body);
+      // Stop, do not throw. Throwing discarded every lead the earlier queries had
+      // already collected, which made reaching the ceiling maximally destructive at
+      // exactly the moment you are probing for it. Keep what we have and report how
+      // far we got, so the budget can be tuned from evidence instead of guesswork.
+      stoppedAfter = spent;
+      stopReason = `SAM.gov HTTP ${res.status}` +
+        (limited ? " — daily rate limit reached (resets midnight ET)" : "") +
+        `. Stopped after ${spent} of ${queries.length} queries.` +
+        (limited ? ` Set SAM_DAILY_BUDGET to about ${Math.max(1, spent)}.` : "");
+      break;
     }
+    spent++;
     const data = await res.json();
     for (const op of data.opportunitiesData || []) {
       if (seen.has(op.noticeId)) continue;
@@ -609,7 +621,13 @@ async function scanSam(env, store, terms) {
     }
   }
   meta.samLastRun = new Date().toISOString();
+  meta.samQueriesSpent = spent;
   await store.set("meta", meta);
+  // A partial sweep still reports ok when it found work, because those leads are
+  // real. The reason rides along so System Health shows the ceiling was reached.
+  if (stoppedAfter !== null) {
+    return { status: leads.length ? "ok" : "error", found: leads.length, leads, error: stopReason };
+  }
   return { status: "ok", found: leads.length, leads };
 }
 
