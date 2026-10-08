@@ -25,8 +25,10 @@ export const SOURCES = [
   // --- Federal ---
   { id: "sam", name: "SAM.gov (Federal)", kind: "sam", url: "https://sam.gov" },
   // --- Missouri state ---
+  // state tag matters: without it a geography filter drops this source, and it
+  // is the most productive board on the list.
   { id: "fmdc", name: "Missouri OA-FMDC (state construction)", kind: "fmdc",
-    url: "https://oa.mo.gov/facilities/bid-opportunities/bid-listing-electronic-plans" },
+    url: "https://oa.mo.gov/facilities/bid-opportunities/bid-listing-electronic-plans", state: "MO" },
   { id: "mobuys", name: "MissouriBUYS / MOVERS bid board", kind: "generic",
     url: "https://missouribuys.mo.gov/bid-board/movers", state: "MO",
     note: "MOVERS is a JavaScript portal - if this scan comes back thin, check the board manually." },
@@ -270,7 +272,25 @@ export const SOURCES = [
   { id: "kumed", name: "KU Medical Center bids", kind: "generic",
     url: "https://www.kumc.edu/finance/supply-chain/bid-opportunities.html", state: "KS" },
   { id: "ku", name: "University of Kansas bids", kind: "generic",
-    url: "https://procurement.ku.edu/kuother-bid-opportunities", state: "KS" }
+    url: "https://procurement.ku.edu/kuother-bid-opportunities", state: "KS" },
+
+  /* ---- statewide portals outside the KC metro ----
+     Every entry below was fetched and confirmed to return server-rendered HTML
+     with real solicitation content before being added. Candidates that returned
+     a JavaScript shell (CA, FL, VA, NY), a 404/403, or a page with no bid
+     content (NM) were left out rather than listed as coverage we do not have. */
+  { id: "txesbd", name: "Texas Electronic State Business Daily", kind: "generic",
+    url: "https://www.txsmartbuy.gov/esbd", state: "TX" },
+  { id: "paemkt", name: "Pennsylvania eMarketplace", kind: "generic",
+    url: "https://www.emarketplace.state.pa.us/Search.aspx", state: "PA" },
+  { id: "ncevp", name: "North Carolina electronic Vendor Portal", kind: "generic",
+    url: "https://evp.nc.gov/solicitations/", state: "NC" },
+  { id: "azapp", name: "Arizona Procurement Portal", kind: "generic",
+    url: "https://app.az.gov/page.aspx/en/rfp/request_browse_public", state: "AZ" },
+  { id: "tncpo", name: "Tennessee Central Procurement Office", kind: "generic",
+    url: "https://www.tn.gov/generalservices/procurement/central-procurement-office--cpo-/supplier-information/request-for-proposals--rfp--opportunities1.html", state: "TN" },
+  { id: "inidoa", name: "Indiana IDOA business opportunities", kind: "generic",
+    url: "https://www.in.gov/idoa/procurement/current-business-opportunities/", state: "IN" }
 ];
 
 /* ================= SOURCE REGISTRY =================
@@ -429,19 +449,25 @@ export function parseGenericHtml(html, src, terms) {
 // glazing work, burying the actual film jobs, so only one regional glazing query
 // remains as an upsell feed.
 const SAM_QUERIES = [
-  { title: "window film" },          // nationwide
-  { title: "window tinting" },       // nationwide
-  { title: "security film" },        // nationwide
-  { title: "solar control film" },   // nationwide
-  { title: "safety film" },          // nationwide
-  { title: "blast mitigation" },     // nationwide
-  { title: "anti-graffiti" },        // nationwide
-  // The glazing upsell query used to run twice, pinned to MO and KS. Merging it
-  // into one nationwide query widens coverage to all 50 states AND costs one
-  // request less, which matters: the comment below is right that the daily
-  // quota is the real ceiling here, not the code.
-  { title: "glazing" },              // nationwide upsell — 8 calls/scan, still under
-                                      // the personal SAM.gov key's ~10/day limit above
+  // Every query is film-explicit and nationwide. SAM matches the title as a
+  // substring, so "window tint" also catches "window tinting" and one entry
+  // covers both.
+  //
+  // Glazing was dropped deliberately. It was the noisiest query by far and it
+  // is an upsell signal rather than film work, so spending one of a very small
+  // daily quota on it cost film coverage elsewhere. Glazing leads still arrive
+  // from the state and local boards, which have no such quota.
+  //
+  // Seven calls per scan, sized to stay under the personal SAM.gov key limit of
+  // roughly 10 requests a day. A system account key raises that ceiling and is
+  // the cheapest way to widen federal coverage.
+  { title: "window film" },
+  { title: "window tint" },
+  { title: "security film" },
+  { title: "solar control film" },
+  { title: "safety film" },
+  { title: "blast mitigation" },
+  { title: "anti-graffiti" }
 ];
 
 async function scanSam(env, store, terms) {

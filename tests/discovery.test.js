@@ -110,9 +110,26 @@ test("a region filter expands to its states", () => {
   const both = selectSources({ states: REGIONS.Midwest });
   assert.equal(midwest.length, both.length);
   const west = selectSources({ regions: ["West"] });
-  // Nothing but the federal feed is in the West yet; that is the honest
-  // current state of coverage, not a bug.
   assert.ok(west.every(s => s.scope === "federal" || REGIONS.West.includes(s.state)));
+});
+
+test("every region has at least one non-federal source", () => {
+  // Coverage used to be Midwest-only, so a user filtering to the West got the
+  // federal feed and nothing else while the UI implied a real search. If this
+  // fails, a region was added to REGIONS without any source behind it.
+  for (const region of Object.keys(REGIONS)) {
+    const local = selectSources({ regions: [region] }).filter(s => s.scope !== "federal");
+    assert.ok(local.length > 0, `${region} has no non-federal source behind it`);
+  }
+});
+
+test("added state portals are tagged with a state we can filter by", () => {
+  // A source with no state is unreachable by any geography filter and would
+  // silently never be scanned once someone narrows the search.
+  for (const s of sourceRegistry()) {
+    if (s.scope === "federal") continue;
+    assert.ok(s.state && regionOf(s.state), `${s.id} has an unusable state: ${s.state}`);
+  }
 });
 
 test("only automatable sources are scanned", () => {
