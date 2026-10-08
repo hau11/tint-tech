@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { PDFDocument } from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist";
+import { calibrate, measureRectangle, summarizeMeasurements } from "../src/measure.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
 /* ============ DESIGN TOKENS (Tint Tech KC brand) ============ */
@@ -2564,6 +2565,7 @@ function Copilot(){
   const [splitStage,setSplitStage] = useState("");
   const [splitNote,setSplitNote] = useState("");
   const [splitParts,setSplitParts] = useState(null); // [{name,size,url,firstPage,lastPage}]
+  const [pane,setPane] = useState("chat");
   const fileRef = useRef();
   const scrollRef = useRef();
 
@@ -2753,6 +2755,18 @@ function Copilot(){
         </div>
       </div>
       {err && <p style={{color:"var(--bad)",fontSize:13,margin:"0 0 10px"}}><AlertTriangle size={14} style={{verticalAlign:-2}}/> {err}</p>}
+        <div style={{display:"flex",gap:6,marginBottom:10}}>
+          <button className="chip" onClick={()=>setPane("chat")}
+            style={pane==="chat"?{background:"var(--accent)",color:"#fff",borderColor:"var(--accent)"}:{}}>Ask</button>
+          <button className="chip" onClick={()=>setPane("takeoff")}
+            style={pane==="takeoff"?{background:"var(--accent)",color:"#fff",borderColor:"var(--accent)"}:{}}>Takeoff</button>
+        </div>
+        {pane==="takeoff" && (
+          <div style={{overflow:"auto",flex:1,paddingBottom:20}}>
+            <GlassTakeoff doc={doc}/>
+          </div>
+        )}
+        {pane==="chat" && (<>
 
       {oversized && (
         <div className="card" style={{padding:16,marginBottom:14,border:"1px solid var(--line)"}}>
@@ -2834,6 +2848,7 @@ function Copilot(){
           </div>
         </>
       )}
+        </>)}
     </div>
   );
 }
@@ -2905,6 +2920,237 @@ function LeadTester(){
           {r.reasons?.length>0 && (
             <div style={{fontSize:12,color:"var(--azure)"}}>{r.reasons.join(" · ")}</div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============ FLAT GLASS TAKEOFF ============ */
+// On-screen takeoff over a blueprint sheet.
+// The scale is calibrated by the estimator against a known dimension. Nothing
+// measures until that is done, and no AI is asked to judge a dimension from
+// pixels: a sheet that has been cropped, rescaled or reprinted carries no
+// trustworthy scale, so a vision guess would be an invented number on a bid.
+const FILM_CHOICES = ["Solar Control","Security","Safety","Blast Mitigation","Decorative",
+  "Privacy","Bird Strike","Anti-Graffiti","Switchable","Not specified"];
+
+function GlassTakeoff({doc}){
+  const [src,setSrc] = useState(null);
+  const [pageNo,setPageNo] = useState(1);
+  const [pageCount,setPageCount] = useState(1);
+  const [loading,setLoading] = useState(false);
+  const [err,setErr] = useState("");
+  const [zoom,setZoom] = useState(1);
+  const [pan,setPan] = useState({x:0,y:0});
+  const [mode,setMode] = useState("measure");
+  const [cal,setCal] = useState(null);
+  const [drag,setDrag] = useState(null);
+  const [items,setItems] = useState([]);
+  const [filmType,setFilmType] = useState("Solar Control");
+  const [rate,setRate] = useState("");
+  const [waste,setWaste] = useState(10);
+  const wrapRef = useRef();
+
+  // Blueprints are usually PDFs. Rasterise large: measurement precision is
+  // bounded by the pixels the estimator is given to click on.
+  useEffect(()=>{
+    let cancelled = false;
+    async function load(){
+      if(!doc){ setSrc(null); return; }
+      setErr(""); setLoading(true);
+      try{
+        if((doc.media||"").startsWith("image/")){
+          if(!cancelled){ setSrc(`data:${doc.media};base64,${doc.base64}`); setPageCount(1); }
+        } else {
+          const pdfjsLib2 = await loadPdfJs();
+          const bytes = Uint8Array.from(atob(doc.base64), c=>c.charCodeAt(0));
+          const pdf = await pdfjsLib2.getDocument({ data: bytes }).promise;
+          if(cancelled) return;
+          setPageCount(pdf.numPages);
+          const page = await pdf.getPage(Math.min(pageNo, pdf.numPages));
+          const base = page.getViewport({ scale: 1 });
+          const sc = Math.min(4, 2400 / base.width);
+          const viewport = page.getViewport({ scale: sc });
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.floor(viewport.width);
+          canvas.height = Math.floor(viewport.height);
+          await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+          if(!cancelled) setSrc(canvas.toDataURL("image/png"));
+        }
+      }catch(e){ if(!cancelled) setErr("Could not open that sheet: " + e.message); }
+      if(!cancelled) setLoading(false);
+    }
+    load();
+    return ()=>{ cancelled = true; };
+  },[doc,pageNo]);
+
+  // A different sheet can be drawn at a different scale, so reusing the old
+  // calibration would be wrong on every line that followed.
+  useEffect(()=>{ setCal(null); },[pageNo]);
+
+  const toImg = e => {
+    const r = wrapRef.current.getBoundingClientRect();
+    return { x: (e.clientX - r.left - pan.x) / zoom, y: (e.clientY - r.top - pan.y) / zoom };
+  };
+  const onDown = e => {
+    if(!src) return;
+    if(mode === "pan"){ setDrag({ kind:"pan", sx:e.clientX, sy:e.clientY, ox:pan.x, oy:pan.y }); return; }
+    const q = toImg(e);
+    setDrag({ kind: mode, x0:q.x, y0:q.y, x1:q.x, y1:q.y });
+  };
+  const onMove = e => {
+    if(!drag) return;
+    if(drag.kind === "pan"){ setPan({ x: drag.ox + (e.clientX-drag.sx), y: drag.oy + (e.clientY-drag.sy) }); return; }
+    const q = toImg(e);
+    setDrag(d => ({ ...d, x1:q.x, y1:q.y }));
+  };
+  const onUp = ()=>{
+    if(!drag) return;
+    const d = drag; setDrag(null);
+    if(d.kind === "pan") return;
+    const dx = d.x1-d.x0, dy = d.y1-d.y0;
+    if(d.kind === "calibrate"){
+      const px = Math.sqrt(dx*dx + dy*dy);
+      if(px < 5) return;
+      const typed = window.prompt("That line is " + Math.round(px) + " pixels. What is its real length? Examples: 10-6, 10ft 6in, 126in");
+      if(typed == null) return;
+      const c2 = calibrate({ pixelDistance: px, realLength: typed });
+      if(!c2.ok){ setErr(c2.reason); return; }
+      setErr(""); setCal(c2); setMode("measure");
+      return;
+    }
+    if(Math.abs(dx) < 4 || Math.abs(dy) < 4) return;
+    const m = measureRectangle({ x0:d.x0, y0:d.y0, x1:d.x1, y1:d.y1 }, cal, { filmType });
+    if(!m.ok){ setErr(m.reason); return; }
+    setErr("");
+    setItems(prev => [...prev, { ...m, key: Math.random().toString(36).slice(2),
+      rect:{x0:Math.min(d.x0,d.x1),y0:Math.min(d.y0,d.y1),x1:Math.max(d.x0,d.x1),y1:Math.max(d.y0,d.y1)}, page: pageNo }]);
+  };
+
+  // Measure one typical opening, then say there are fourteen of them.
+  const update = (key, patch) => setItems(prev => prev.map(it => {
+    if(it.key !== key) return it;
+    const next = { ...it, ...patch };
+    const re = measureRectangle(it.rect, cal, { quantity: next.quantity, mark: next.window_mark, filmType: next.film_type });
+    return re.ok ? { ...next, ...re, key: it.key, rect: it.rect, page: it.page } : next;
+  }));
+
+  const pageItems = items.filter(i => i.page === pageNo);
+  const summary = summarizeMeasurements(items);
+  const rateNum = Number(rate);
+  const wasteNum = Math.max(0, Number(waste) || 0);
+  const withWaste = Math.round(summary.totalSf * (1 + wasteNum/100) * 100) / 100;
+  const money = Number.isFinite(rateNum) && rateNum > 0 ? Math.round(withWaste * rateNum * 100)/100 : null;
+
+  const bidText = ()=>{
+    const out = [];
+    out.push("FLAT GLASS / WINDOW FILM BID");
+    if(doc && doc.name) out.push("Sheet: " + doc.name);
+    out.push("Date: " + new Date().toLocaleDateString());
+    out.push("");
+    out.push("MARK            QTY   SIZE                 SF        FILM");
+    for(const i of items.filter(x=>x.ok)){
+      out.push(String(i.window_mark || "-").padEnd(15) + String(i.quantity).padEnd(6) +
+        String(i.dimensions).padEnd(21) + String(i.area_sf).padEnd(10) + String(i.film_type || "Not specified"));
+    }
+    out.push("");
+    out.push("Measured area:      " + summary.totalSf + " SF across " + summary.count + " opening(s)");
+    for(const k of Object.keys(summary.byFilm)) out.push("  " + k + ": " + summary.byFilm[k] + " SF");
+    out.push("Waste allowance:    " + wasteNum + "%");
+    out.push("Material required:  " + withWaste + " SF");
+    out.push(money != null ? "Installed price:    $" + money.toLocaleString() + " at $" + rateNum + "/SF"
+                           : "Installed price:    enter your $/SF rate to price this bid");
+    if(summary.largestPaneIn > 72) out.push("NOTE: largest pane is " + summary.largestPaneIn + "in, over 72in, so a seam is required.");
+    if(summary.note) out.push("NOTE: " + summary.note);
+    if(cal && cal.lowConfidence) out.push("NOTE: " + cal.warning);
+    out.push("");
+    out.push("All quantities measured from the drawing at a calibrated scale.");
+    out.push("Verify openings in the field before fabrication.");
+    return out.join("\n");
+  };
+
+  if(!doc) return <div className="muted">Upload a sheet above, then come back here to measure it.</div>;
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginBottom:8}}>
+        <button className="chip" onClick={()=>setMode("calibrate")} style={mode==="calibrate"?{background:"var(--warn)",color:"#fff",borderColor:"var(--warn)"}:{}}>{cal ? "Re-calibrate" : "1. Set scale"}</button>
+        <button className="chip" onClick={()=>setMode("measure")} disabled={!cal} style={mode==="measure"?{background:"var(--accent)",color:"#fff",borderColor:"var(--accent)"}:{}}>2. Measure</button>
+        <button className="chip" onClick={()=>setMode("pan")} style={mode==="pan"?{background:"var(--accent)",color:"#fff",borderColor:"var(--accent)"}:{}}>Pan</button>
+        <button className="chip" onClick={()=>setZoom(z=>Math.max(0.1, z/1.25))}>Zoom out</button>
+        <button className="chip" onClick={()=>setZoom(z=>Math.min(12, z*1.25))}>Zoom in</button>
+        <button className="chip" onClick={()=>{setZoom(1);setPan({x:0,y:0});}}>Reset view</button>
+        <span className="muted" style={{fontSize:12}}>{Math.round(zoom*100)}%</span>
+        {pageCount > 1 && (<>
+          <button className="chip" onClick={()=>setPageNo(n=>Math.max(1,n-1))} disabled={pageNo<=1}>Prev sheet</button>
+          <span className="muted" style={{fontSize:12}}>Sheet {pageNo} of {pageCount}</span>
+          <button className="chip" onClick={()=>setPageNo(n=>Math.min(pageCount,n+1))} disabled={pageNo>=pageCount}>Next sheet</button>
+        </>)}
+      </div>
+      <div className="card" style={{padding:10,marginBottom:8}}>
+        {!cal && <div style={{color:"var(--warn)",fontWeight:600}}>Not calibrated. Tap <b>Set scale</b>, drag along a dimension you know, and type its real length. Nothing can be measured until then.</div>}
+        {cal && <div>Scale: <b>{cal.note}</b>{cal.warning && <span style={{color:"var(--warn)"}}> - {cal.warning}</span>}</div>}
+        {err && <div style={{color:"var(--bad)",marginTop:4}}>{err}</div>}
+      </div>
+      <div ref={wrapRef} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
+        onWheel={e=>{ if(e.ctrlKey||e.metaKey){ e.preventDefault(); setZoom(z=>Math.min(12,Math.max(0.1, z * (e.deltaY<0?1.1:0.9)))); } }}
+        style={{position:"relative",overflow:"hidden",height:560,background:"#111",borderRadius:8,cursor: mode==="pan" ? "grab" : "crosshair", userSelect:"none"}}>
+        {loading && <div style={{color:"#fff",padding:16}}>Rendering sheet...</div>}
+        {src && (<>
+          <img src={src} alt="" draggable={false} style={{position:"absolute",left:0,top:0,transformOrigin:"0 0",transform:`translate(${pan.x}px,${pan.y}px) scale(${zoom})`}}/>
+          <svg style={{position:"absolute",left:0,top:0,width:"100%",height:"100%",pointerEvents:"none"}}>
+            <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+              {pageItems.map(i=>(
+                <g key={i.key}>
+                  <rect x={i.rect.x0} y={i.rect.y0} width={i.rect.x1-i.rect.x0} height={i.rect.y1-i.rect.y0} fill="rgba(56,189,248,0.22)" stroke="#38bdf8" strokeWidth={1/zoom}/>
+                  <text x={i.rect.x0+3/zoom} y={i.rect.y0-3/zoom} fill="#38bdf8" fontSize={12/zoom}>{i.window_mark ? i.window_mark + " " : ""}{i.dimensions}</text>
+                </g>
+              ))}
+              {drag && drag.kind==="measure" && (<rect x={Math.min(drag.x0,drag.x1)} y={Math.min(drag.y0,drag.y1)} width={Math.abs(drag.x1-drag.x0)} height={Math.abs(drag.y1-drag.y0)} fill="rgba(250,204,21,0.2)" stroke="#facc15" strokeWidth={1/zoom}/>)}
+              {drag && drag.kind==="calibrate" && (<line x1={drag.x0} y1={drag.y0} x2={drag.x1} y2={drag.y1} stroke="#facc15" strokeWidth={2/zoom}/>)}
+            </g>
+          </svg>
+        </>)}
+      </div>
+      <div style={{display:"flex",gap:10,alignItems:"center",margin:"10px 0",flexWrap:"wrap"}}>
+        <label style={{fontSize:13}}>Film for new measurements: <select value={filmType} onChange={e=>setFilmType(e.target.value)}>{FILM_CHOICES.map(t=><option key={t} value={t}>{t}</option>)}</select></label>
+        <label style={{fontSize:13}}>Waste %: <input type="number" value={waste} min={0} max={50} onChange={e=>setWaste(e.target.value)} style={{width:60}}/></label>
+        <label style={{fontSize:13}}>Installed $/SF: <input type="number" value={rate} placeholder="your rate" onChange={e=>setRate(e.target.value)} style={{width:90}}/></label>
+      </div>
+      {Boolean(items.length) && (
+        <div className="card" style={{padding:14,marginBottom:10}}>
+          <table style={{width:"100%",fontSize:13,borderCollapse:"collapse"}}>
+            <thead><tr style={{textAlign:"left"}}><th>Mark</th><th>Qty</th><th>Size</th><th>SF</th><th>Film</th><th>Sheet</th><th></th></tr></thead>
+            <tbody>
+              {items.map(i=>(
+                <tr key={i.key} style={{borderTop:"1px solid var(--line)"}}>
+                  <td><input value={i.window_mark||""} placeholder="W-1" onChange={e=>update(i.key,{window_mark:e.target.value})} style={{width:70}}/></td>
+                  <td><input type="number" min={1} value={i.quantity} onChange={e=>update(i.key,{quantity:e.target.value})} style={{width:56}}/></td>
+                  <td>{i.dimensions}</td>
+                  <td title={i.calculation}>{i.area_sf}</td>
+                  <td><select value={i.film_type||"Not specified"} onChange={e=>update(i.key,{film_type:e.target.value})}>{FILM_CHOICES.map(t=><option key={t} value={t}>{t}</option>)}</select></td>
+                  <td className="muted">{i.page}</td>
+                  <td><button className="chip" onClick={()=>setItems(prev=>prev.filter(x=>x.key!==i.key))}>Remove</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{marginTop:10,fontSize:13}}>
+            <div><b>{summary.totalSf} SF</b> measured across {summary.count} opening(s)</div>
+            <div className="muted">With {wasteNum}% waste: {withWaste} SF{money != null ? " - $" + money.toLocaleString() : " - enter a $/SF rate to price it"}</div>
+            {summary.largestPaneIn > 72 && <div style={{color:"var(--warn)"}}>Largest pane is {summary.largestPaneIn}in, over 72in: a seam is required.</div>}
+            {summary.note && <div style={{color:"var(--warn)"}}>{summary.note}</div>}
+          </div>
+        </div>
+      )}
+      {Boolean(items.length) && (
+        <div className="card" style={{padding:14}}>
+          <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:8}}>
+            <b>Bid sheet</b>
+            <button className="chip" onClick={()=>navigator.clipboard && navigator.clipboard.writeText(bidText())}>Copy</button>
+          </div>
+          <pre style={{whiteSpace:"pre-wrap",fontSize:12,fontFamily:"ui-monospace,monospace",margin:0}}>{bidText()}</pre>
         </div>
       )}
     </div>
