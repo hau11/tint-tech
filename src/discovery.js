@@ -577,7 +577,18 @@ async function scanSam(env, store, terms) {
       ? `&ncode=${encodeURIComponent(q.ncode)}`
       : `&title=${encodeURIComponent(q.title)}`;
     const url = `https://api.sam.gov/opportunities/v2/search?api_key=${key}&postedFrom=${fmt(from)}` +
-      `&postedTo=${fmt(to)}&limit=25&ptype=o,k,p${filter}${q.state ? `&state=${q.state}` : ""}`;
+    // Two things here are free, in the sense that neither spends another request
+    // against the daily quota.
+    // 
+    // limit was 25. SAM allows far more per call, and the cost is one request
+    // either way, so 100 returns four times the work for the same quota.
+    // 
+    // ptype was o,k,p: solicitation, combined synopsis, presolicitation. Adding
+    // r (sources sought) and s (special notice) widens it to the stage BEFORE a
+    // solicitation exists, where an agency is still asking who can do this. That
+    // is the only point at which film can still be written into the spec, which
+    // is worth more than bidding a job where the scope is already fixed.
+      `&postedTo=${fmt(to)}&limit=100&ptype=o,k,p,r,s${filter}${q.state ? `&state=${q.state}` : ""}`;
     const res = await fetch(url, { headers: UA });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
