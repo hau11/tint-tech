@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SOURCES, SCAN_BATCH, scanSlice, REGIONS, regionOf, normalizeSource, sourceRegistry, selectSources, coverageByRegion } from "../src/discovery.js";
+import { SOURCES, SCAN_BATCH, scanSlice, REGIONS, regionOf, normalizeSource, sourceRegistry, selectSources, coverageByRegion, planSamQueries, samCooldownHours, SAM_CORE_QUERIES, SAM_EXTENDED_QUERIES } from "../src/discovery.js";
 
 /* The scan is batched because Cloudflare caps one Worker invocation at 50
    subrequests on the free plan. Scanning all 89 sources at once asked for
@@ -172,4 +172,56 @@ test("case and junk in a state filter do not silently drop sources", () => {
   assert.equal(selectSources({ states: ["mo"] }).length, selectSources({ states: ["MO"] }).length);
   const junk = selectSources({ states: ["ZZ"] });
   assert.ok(junk.every(s => s.scope === "federal"), "an unknown state should match no local sources");
+});
+
+/* ---------- SAM.gov budget ---------- */
+
+test("a small key spends every request on film-explicit queries", () => {
+  // A personal key allows roughly 10 a day. Those must all go to the queries
+  // most likely to return actual film work.
+  const q = planSamQueries(7);
+  assert.equal(q.length, 7);
+  assert.deepEqual(q, SAM_CORE_QUERIES);
+  assert.ok(q.every(x => x.title), "a small budget should not spend requests on sweeps");
+});
+
+test("a bigger key buys the NAICS sweep first", () => {
+  // Title search only finds work that says film in the title. NAICS 238150 is
+  // Glass and Glazing Contractors, so it surfaces the scope itself and lets the
+  // classifier judge it. That is worth more than any additional keyword.
+  const q = planSamQueries(8);
+  assert.equal(q.length, 8);
+  assert.equal(q[7].ncode, "238150", "the first extra request should be the NAICS sweep");
+});
+
+test("the budget never exceeds the queries available", () => {
+  const all = SAM_CORE_QUERIES.length + SAM_EXTENDED_QUERIES.length;
+  assert.equal(planSamQueries(999).length, all);
+  assert.equal(planSamQueries(all).length, all);
+});
+
+test("a missing or junk budget falls back to a safe default", () => {
+  // This reads an env var, so it must never produce zero queries (a silent dead
+  // scan) or a huge number (a blown quota and a rate-limit lockout).
+  for (const junk of [undefined, null, "", "abc", 0, -5, NaN]) {
+    const q = planSamQueries(junk);
+    assert.ok(q.length >= SAM_CORE_QUERIES.length, `budget ${String(junk)} gave ${q.length} queries`);
+    assert.ok(q.length <= SAM_CORE_QUERIES.length + 1, `budget ${String(junk)} overspent: ${q.length}`);
+  }
+});
+
+test("scan frequency follows the budget, not the calendar", () => {
+  // A small key has to be rationed to one look a day. A large one can afford
+  // several, which matters because federal notices post during business hours.
+  assert.equal(samCooldownHours(8), 20);
+  assert.equal(samCooldownHours(undefined), 20, "an unset budget must stay conservative");
+  assert.equal(samCooldownHours(100), 6);
+});
+
+test("every SAM query is a title search or a NAICS sweep, never both", () => {
+  // scanSam builds one filter or the other; an entry with both would silently
+  // drop one and waste a request from a very small quota.
+  for (const q of [...SAM_CORE_QUERIES, ...SAM_EXTENDED_QUERIES]) {
+    assert.ok(Boolean(q.title) !== Boolean(q.ncode), JSON.stringify(q));
+  }
 });

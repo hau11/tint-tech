@@ -10,6 +10,12 @@ APP_URL=
 
 # ---- SAM.gov (free key, self-serve at sam.gov) ----
 SAM_API_KEY=
+# How many SAM.gov requests one scan may spend. A personal key allows roughly
+# 10 a day, which is the default. A system account key (request one at sam.gov
+# under Account Details) allows far more: raise this and the scan automatically
+# adds the NAICS 238150 glass-and-glazing sweep plus more film terms, and at 40+
+# it also drops the cooldown from 20 hours to 6.
+SAM_DAILY_BUDGET=
 
 # ---- Morning digest email (Resend) ----
 RESEND_API_KEY=

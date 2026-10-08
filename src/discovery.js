@@ -480,19 +480,13 @@ export function parseGenericHtml(html, src, terms) {
 // Film-first. Broad "window"/"glazing" searches were returning mostly glass and
 // glazing work, burying the actual film jobs, so only one regional glazing query
 // remains as an upsell feed.
-const SAM_QUERIES = [
-  // Every query is film-explicit and nationwide. SAM matches the title as a
-  // substring, so "window tint" also catches "window tinting" and one entry
-  // covers both.
-  //
-  // Glazing was dropped deliberately. It was the noisiest query by far and it
-  // is an upsell signal rather than film work, so spending one of a very small
-  // daily quota on it cost film coverage elsewhere. Glazing leads still arrive
-  // from the state and local boards, which have no such quota.
-  //
-  // Seven calls per scan, sized to stay under the personal SAM.gov key limit of
-  // roughly 10 requests a day. A system account key raises that ceiling and is
-  // the cheapest way to widen federal coverage.
+// Federal queries are budgeted, because the quota is the real ceiling here.
+// A personal SAM.gov key allows roughly 10 requests a day; a system account
+// key allows far more. SAM_DAILY_BUDGET lets the scan use whatever the key
+// actually permits without a code change when that key is upgraded.
+export const SAM_CORE_QUERIES = [
+// Film-explicit and nationwide. SAM matches the title as a substring, so
+// "window tint" also covers "window tinting" in one request.
   { title: "window film" },
   { title: "window tint" },
   { title: "security film" },
@@ -502,20 +496,67 @@ const SAM_QUERIES = [
   { title: "anti-graffiti" }
 ];
 
+// Spent only when the budget allows. Ordered by expected value, so a key with
+// room for one extra request spends it on the NAICS sweep.
+// 
+// The NAICS query is the important one. Title search only finds work that
+// says film in its title, which is exactly the opportunity the classifier is
+// meant to catch when it does NOT. NAICS 238150 is Glass and Glazing
+// Contractors, so it surfaces the scope itself and lets relevance.js judge
+// it, rather than relying on a procurement officer choosing our vocabulary.
+export const SAM_EXTENDED_QUERIES = [
+  { ncode: "238150", label: "NAICS 238150 glass and glazing contractors" },
+  { title: "decorative film" },
+  { title: "privacy film" },
+  { title: "frosted film" },
+  { title: "uv film" },
+  { title: "bird strike" },
+  { title: "08 87 13" },
+// The glazing upsell, affordable again only with a larger key.
+  { title: "glazing" }
+];
+
+// Pure, so the budget rules are testable without touching the network.
+export function planSamQueries(budget) {
+  const n = Math.floor(Number(budget));
+  const b = Number.isFinite(n) && n > 0 ? n : SAM_CORE_QUERIES.length + 1;
+  if (b <= SAM_CORE_QUERIES.length) return SAM_CORE_QUERIES.slice(0, b);
+  return [...SAM_CORE_QUERIES, ...SAM_EXTENDED_QUERIES.slice(0, b - SAM_CORE_QUERIES.length)];
+}
+
+// A small key must be rationed to one scan a day. A large one can afford to
+// look several times a day, which matters because federal notices post on
+// business hours, not on our cron schedule.
+export function samCooldownHours(budget) {
+  const n = Math.floor(Number(budget));
+  return Number.isFinite(n) && n >= 40 ? 6 : 20;
+}
+
 async function scanSam(env, store, terms) {
   const key = env.SAM_API_KEY;
   if (!key) return { status: "skipped", found: 0, leads: [], error: "No SAM_API_KEY secret set" };
   const meta = (await store.get("meta")) || {};
-  // Personal SAM.gov keys allow ~10 requests/day - only hit it once per ~20 hours
+// Budget comes from the key, not from code. Raise SAM_DAILY_BUDGET after
+// upgrading to a system account and both the query count and the scan
+// frequency follow automatically.
+  const budget = env.SAM_DAILY_BUDGET;
+  const queries = planSamQueries(budget);
+  const cooldown = samCooldownHours(budget);
   const last = meta.samLastRun ? Date.now() - new Date(meta.samLastRun).getTime() : Infinity;
-  if (last < 20 * 3600 * 1000) {
-    return { status: "skipped", found: 0, leads: [], error: "SAM already scanned in the last 20h (daily API limit protection)" };
+  if (last < cooldown * 3600 * 1000) {
+    return { status: "skipped", found: 0, leads: [],
+      error: `SAM already scanned in the last ${cooldown}h (daily API limit protection)` };
   }
   const fmt = d => `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
   const to = new Date(); const from = new Date(Date.now() - 60 * 86400000);
   const leads = []; const seen = new Set();
-  for (const q of SAM_QUERIES) {
-    const url = `https://api.sam.gov/opportunities/v2/search?api_key=${key}&postedFrom=${fmt(from)}&postedTo=${fmt(to)}&limit=25&ptype=o,k,p&title=${encodeURIComponent(q.title)}${q.state ? `&state=${q.state}` : ""}`;
+  for (const q of queries) {
+// A query is either a title search or a NAICS sweep, never both.
+    const filter = q.ncode
+      ? `&ncode=${encodeURIComponent(q.ncode)}`
+      : `&title=${encodeURIComponent(q.title)}`;
+    const url = `https://api.sam.gov/opportunities/v2/search?api_key=${key}&postedFrom=${fmt(from)}` +
+      `&postedTo=${fmt(to)}&limit=25&ptype=o,k,p${filter}${q.state ? `&state=${q.state}` : ""}`;
     const res = await fetch(url, { headers: UA });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
