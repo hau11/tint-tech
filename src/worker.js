@@ -1856,6 +1856,7 @@ export default {
             lastDiscovery: meta.lastDiscovery || null,
             leadCount: discovered.length,
             bluebookLastReceived: meta.bluebookLastReceived || null,
+            appUrl: env.APP_URL || null,
             bcConnected: Boolean(await store.get("bc_tokens")),
             bcLastSync: meta.bcLastSync || null,
             passwordSet: Boolean(env.APP_PASSWORD),

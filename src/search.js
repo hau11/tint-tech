@@ -102,7 +102,10 @@ export function summarizeHealth(checks = {}) {
   add("Blue Book webhook", checks.bluebookLastReceived ? "Healthy" : "Not configured",
     checks.bluebookLastReceived
       ? `Last notification received ${checks.bluebookLastReceived.slice(0, 10)}`
-      : "Register /api/ingest/bluebook?token=YOUR_APP_PASSWORD as the webhook callback in Blue Book (see DEPLOY.md).");
+      // Show the real callback URL so it can be pasted straight into Blue Book.
+      // The token stays a placeholder on purpose: APP_PASSWORD must never be
+      // rendered into a screen that someone might screenshot or share.
+      : `Register ${checks.appUrl || ""}/api/ingest/bluebook?token=YOUR_APP_PASSWORD as the webhook callback in Blue Book (see DEPLOY.md).`);
   add("BuildingConnected", checks.bcConnected ? "Healthy" : "Not configured",
     checks.bcConnected
       ? `Connected${checks.bcLastSync ? ` · last synced ${checks.bcLastSync.slice(0, 10)}` : " — tap Sync now"}`

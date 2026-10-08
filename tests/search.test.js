@@ -90,6 +90,23 @@ test("a discovery scan that has never run is still a warning", () => {
   assert.match(item.detail, /no scan has run/i);
 });
 
+test("the Blue Book row gives a pasteable URL but never the password", () => {
+  const h = summarizeHealth({ database: true, appUrl: "https://example.workers.dev" });
+  const item = h.items.find(i => i.name === "Blue Book webhook");
+  assert.match(item.detail, /https:\/\/example\.workers\.dev\/api\/ingest\/bluebook/,
+    "the real base URL should be filled in so it can be copied straight across");
+  // APP_PASSWORD must stay a placeholder. This screen gets screenshotted and
+  // shared, and the token is a bearer credential for the ingest endpoint.
+  assert.match(item.detail, /token=YOUR_APP_PASSWORD/);
+});
+
+test("the Blue Book row still reads sensibly with no app URL configured", () => {
+  const h = summarizeHealth({ database: true });
+  const item = h.items.find(i => i.name === "Blue Book webhook");
+  assert.match(item.detail, /\/api\/ingest\/bluebook/);
+  assert.ok(!/undefined|null/.test(item.detail), "must not leak undefined into the instructions");
+});
+
 /* ---------- CSV ---------- */
 test("csv quotes commas, quotes and newlines", () => {
   const csv = toCsv([{ a: 'He said "hi"', b: "x,y", c: "line1\nline2" }]);
