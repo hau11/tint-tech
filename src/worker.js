@@ -4,7 +4,7 @@
 import PostalMime from "postal-mime";
 import { makeStore, uid } from "./store.js";
 import { scoreOpportunity, blueprintChat, generateProposal } from "./claude.js";
-import { runDiscovery, leadToOpportunity, sourceRegistry, selectSources, REGIONS } from "./discovery.js";
+import { runDiscovery, leadToOpportunity, sourceRegistry, selectSources, REGIONS, coverageByRegion } from "./discovery.js";
 import { DEFAULT_TERMS, mergeTerms } from "./relevance.js";
 import { bluebookToLead } from "./bluebook.js";
 import { buildAuthorizeUrl, exchangeCode, ensureAccessToken, fetchProjectLeads } from "./buildingconnected.js";
@@ -857,7 +857,7 @@ export default {
           byState[k] = (byState[k] || 0) + 1;
         }
         return json({
-          sources, regions: REGIONS, byState,
+          sources, regions: REGIONS, byState, coverage: coverageByRegion(),
           total: sources.length,
           automatable: selectSources({}).length
         });

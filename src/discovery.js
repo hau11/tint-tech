@@ -279,12 +279,20 @@ export const SOURCES = [
      with real solicitation content before being added. Candidates that returned
      a JavaScript shell (CA, FL, VA, NY), a 404/403, or a page with no bid
      content (NM) were left out rather than listed as coverage we do not have. */
+  // MANUAL: these three serve a page full of text but NOT the solicitation rows.
+  // Their links are navigation or table headers, so the js-portal heuristic
+  // (which only fires under 600 characters) would pass them as "ok" while they
+  // returned zero leads forever. Listed so they can be checked by hand, and
+  // excluded from the automated scan so they can never be counted as searched.
   { id: "txesbd", name: "Texas Electronic State Business Daily", kind: "generic",
-    url: "https://www.txsmartbuy.gov/esbd", state: "TX" },
+    url: "https://www.txsmartbuy.gov/esbd", state: "TX", access: "MANUAL",
+    note: "Results load via JavaScript; the served HTML has no solicitation rows." },
   { id: "paemkt", name: "Pennsylvania eMarketplace", kind: "generic",
-    url: "https://www.emarketplace.state.pa.us/Search.aspx", state: "PA" },
+    url: "https://www.emarketplace.state.pa.us/Search.aspx", state: "PA", access: "MANUAL",
+    note: "Search form only. Results need a POST, so the page serves headers and no rows." },
   { id: "ncevp", name: "North Carolina electronic Vendor Portal", kind: "generic",
-    url: "https://evp.nc.gov/solicitations/", state: "NC" },
+    url: "https://evp.nc.gov/solicitations/", state: "NC", access: "MANUAL",
+    note: "Results load via JavaScript; the served HTML has no solicitation rows." },
   { id: "azapp", name: "Arizona Procurement Portal", kind: "generic",
     url: "https://app.az.gov/page.aspx/en/rfp/request_browse_public", state: "AZ" },
   { id: "tncpo", name: "Tennessee Central Procurement Office", kind: "generic",
@@ -319,7 +327,11 @@ export function regionOf(state) {
  * the app must never imply it searched somewhere it cannot reach. Anything
  * beyond FREE is not scanned automatically and is surfaced for manual search.
  */
-export const ACCESS = ["FREE", "FREE_TO_SEARCH", "FREE_WITH_ACCOUNT", "FREEMIUM", "PAID", "UNKNOWN"];
+export const ACCESS = ["FREE", "MANUAL", "FREE_TO_SEARCH", "FREE_WITH_ACCOUNT", "FREEMIUM", "PAID", "UNKNOWN"];
+
+// MANUAL means the page is public and free but does not serve its listings as
+// HTML, so it cannot be scanned. It is shown as Manual Search Required rather
+// than quietly dropped, because the board is still worth a human visit.
 
 /** Fill in the defaults the terse entries above leave implicit. */
 export function normalizeSource(src = {}) {
@@ -350,6 +362,26 @@ export function sourceRegistry() {
  * covers every state, so dropping it when someone filters to one state would
  * silently lose the best nationwide feed.
  */
+// What coverage actually exists, per region. The UI uses this to say plainly
+// that a region has no automated sources, rather than running a scan that
+// quietly returns only the federal feed and looks like a thorough search.
+//
+// Northeast is currently 0 automated: every portal tried there either blocks
+// us (NH and RI return 403), has moved (VT, NY 404), or serves its listings
+// via JavaScript (NJ, PA, CT, MA). That is a real gap, not an oversight.
+export function coverageByRegion() {
+  const out = {};
+  for (const region of Object.keys(REGIONS)) {
+    const all = sourceRegistry().filter(s => s.state && REGIONS[region].includes(String(s.state).toUpperCase()));
+    out[region] = {
+      automated: all.filter(s => s.access === "FREE" && s.enabled).length,
+      manual: all.filter(s => s.access !== "FREE").length,
+      states: [...new Set(all.filter(s => s.access === "FREE").map(s => s.state))].sort()
+    };
+  }
+  return out;
+}
+
 export function selectSources({ states = null, regions = null, includeFederal = true, onlyAutomatable = true } = {}) {
   const wanted = new Set();
   for (const s of states || []) if (s) wanted.add(String(s).toUpperCase());

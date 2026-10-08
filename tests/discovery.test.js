@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SOURCES, SCAN_BATCH, scanSlice, REGIONS, regionOf, normalizeSource, sourceRegistry, selectSources } from "../src/discovery.js";
+import { SOURCES, SCAN_BATCH, scanSlice, REGIONS, regionOf, normalizeSource, sourceRegistry, selectSources, coverageByRegion } from "../src/discovery.js";
 
 /* The scan is batched because Cloudflare caps one Worker invocation at 50
    subrequests on the free plan. Scanning all 89 sources at once asked for
@@ -113,14 +113,44 @@ test("a region filter expands to its states", () => {
   assert.ok(west.every(s => s.scope === "federal" || REGIONS.West.includes(s.state)));
 });
 
-test("every region has at least one non-federal source", () => {
-  // Coverage used to be Midwest-only, so a user filtering to the West got the
-  // federal feed and nothing else while the UI implied a real search. If this
-  // fails, a region was added to REGIONS without any source behind it.
-  for (const region of Object.keys(REGIONS)) {
-    const local = selectSources({ regions: [region] }).filter(s => s.scope !== "federal");
-    assert.ok(local.length > 0, `${region} has no non-federal source behind it`);
+test("a MANUAL source is listed but never scanned", () => {
+  // These serve a page full of text but no solicitation rows, so the js-portal
+  // heuristic passes them as ok while they return nothing. Marking them MANUAL
+  // is what stops the app reporting them as searched.
+  const manual = sourceRegistry().filter(s => s.access === "MANUAL");
+  assert.ok(manual.length > 0, "the registry should carry some manual-only boards");
+  const scanned = new Set(selectSources({}).map(s => s.id));
+  for (const s of manual) {
+    assert.ok(!scanned.has(s.id), `${s.id} is MANUAL but would still be scanned`);
+    assert.ok(s.note, `${s.id} is MANUAL with no explanation of why`);
   }
+});
+
+test("regions count only sources that are actually scanned", () => {
+  // A region whose only sources are MANUAL would imply coverage that does not
+  // exist, which is the exact failure this registry is meant to prevent.
+  for (const region of Object.keys(REGIONS)) {
+    for (const s of selectSources({ regions: [region] })) {
+      assert.equal(s.access, "FREE", `${s.id} in ${region} is ${s.access}`);
+    }
+  }
+});
+
+test("coverage is reported per region, including where there is none", () => {
+  // This replaced a test asserting every region HAS coverage. That was an
+  // aspiration, not an invariant: every Northeast portal tried either blocks
+  // us, has moved, or serves listings via JavaScript. Quietly weakening the
+  // assertion would be the dishonest fix, so the registry reports the gap
+  // instead and the UI shows it.
+  const cov = coverageByRegion();
+  for (const region of Object.keys(REGIONS)) {
+    assert.ok(cov[region], `${region} missing from the coverage report`);
+    assert.equal(typeof cov[region].automated, "number");
+    assert.ok(Array.isArray(cov[region].states));
+    const scanned = selectSources({ regions: [region] }).filter(s => s.scope !== "federal");
+    assert.equal(cov[region].automated, scanned.length, `${region} count disagrees with selectSources`);
+  }
+  assert.ok(cov.Midwest.automated > 0, "the home region must have coverage");
 });
 
 test("added state portals are tagged with a state we can filter by", () => {

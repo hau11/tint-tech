@@ -2983,10 +2983,12 @@ function Discovery({onImported}){
   const [geoStates,setGeoStates] = useState([]);
   const [srcOpen,setSrcOpen] = useState(false);
   const [srcData,setSrcData] = useState(null);
+  const [coverage,setCoverage] = useState(null);
   const loadSources = async ()=>{
-    try{ setSrcData(await api("/discovery/sources")); }
+    try{ const r = await api("/discovery/sources"); setSrcData(r); setCoverage(r?.coverage||null); }
     catch(e){ setErr("Could not load sources: " + e.message); }
   };
+  useEffect(()=>{ api("/discovery/sources").then(r=>setCoverage(r?.coverage||null)).catch(()=>{}); },[]);
   const toggleRegion = r => setGeoRegions(p => p.includes(r) ? p.filter(x=>x!==r) : [...p, r]);
   const nationwide = geoRegions.length === 0 && geoStates.length === 0;
 
@@ -3032,16 +3034,31 @@ function Discovery({onImported}){
           style={nationwide?{background:"var(--accent)",color:"#fff",borderColor:"var(--accent)"}:{}}>
           United States
         </button>
-        {REGION_NAMES.map(r=>(
-          <button key={r} className="chip" onClick={()=>toggleRegion(r)}
-            style={geoRegions.includes(r)?{background:"var(--accent)",color:"#fff",borderColor:"var(--accent)"}:{}}>
-            {r}
-          </button>
-        ))}
+        {REGION_NAMES.map(r=>{
+          const n = coverage?.[r]?.automated;
+          const none = n === 0;
+          return (
+            <button key={r} className="chip" onClick={()=>toggleRegion(r)}
+              title={none ? "No automated sources here yet - a scan returns the federal feed only" : undefined}
+              style={geoRegions.includes(r)
+                ? {background:"var(--accent)",color:"#fff",borderColor:"var(--accent)"}
+                : none ? {opacity:0.55} : {}}>
+              {r}{typeof n === "number" ? ` (${n})` : ""}
+            </button>
+          );
+        })}
         <button className="chip" onClick={()=>{ const next=!srcOpen; setSrcOpen(next); if(next && !srcData) loadSources(); }}>
           {srcOpen ? "Hide sources" : "Sources"}
         </button>
       </div>
+      {coverage && geoRegions.length > 0 && geoRegions.every(r=>coverage[r]?.automated === 0) && (
+        <div className="card" style={{marginBottom:12,padding:12,borderLeft:"3px solid var(--warn)"}}>
+          <strong>No automated sources in {geoRegions.join(", ")} yet.</strong>{" "}
+          A scan here returns the federal feed only. Portals in this region either block
+          automated access, have moved, or serve their listings via JavaScript. The Sources
+          panel lists the ones worth checking by hand.
+        </div>
+      )}
       {srcOpen && (
         <div className="card" style={{marginBottom:12,padding:14}}>
           {!srcData && <div className="muted">Loading…</div>}
