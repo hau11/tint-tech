@@ -5,7 +5,7 @@ import {
   isReservationExpired, attributionConfidence, billingTrigger, billingDisclosure,
   buildTimeline, appendEvent, nextLeadId, getEvents, deliverLead, recordView,
   claimLead, markPursuing, submitBid, reportOutcome, declineLead, reserveLead,
-  expireReservations, attributionRecord
+  expireReservations, attributionRecord, opportunityToProject
 } from "../src/leads.js";
 
 /* ------------------------------------------------------------------
@@ -522,4 +522,68 @@ test("the reason list is a closed set", () => {
   assert.ok(RELEASE_REASONS.includes("already_awarded"));
   assert.ok(RELEASE_REASONS.includes("no_film_scope"));
   assert.ok(RELEASE_REASONS.includes("other"));
+});
+
+
+/* ------------------------------------------------------------------
+   Opportunity -> Project.
+
+   The Deliver Leads screen lists opportunities out of the KV document store,
+   but delivery, attribution and billing all key off the D1 `projects` table.
+   Nothing wrote one into the other, so an opportunity imported from Discovery
+   had no project row and picking it answered "Project not found". These pin
+   the mapping the resolver uses to close that gap.
+   ------------------------------------------------------------------ */
+
+test("opportunityToProject maps the fields delivery needs", () => {
+  const p = opportunityToProject({
+    id: "ql4zgz40",
+    name: "M67854-27-I-0503 - Window Tint Installation RFI",
+    bidNumber: "M67854-27-I-0503",
+    owner: "SAM.gov", architect: "AE Partners", gc: "Turner",
+    city: "Kansas City", county: "Jackson", state: "MO",
+    type: "Public", bidDue: "2026-10-15", preBid: "2026-10-01",
+    status: "Qualified", source: "https://sam.gov/opp/123",
+    notes: "Film named in the title.", discovered: "2026-10-09",
+    filmTypes: ["Security", "Solar Control"]
+  });
+  assert.strictEqual(p.id, "ql4zgz40");
+  assert.strictEqual(p.project_number, "M67854-27-I-0503");
+  assert.strictEqual(p.general_contractor, "Turner");
+  assert.strictEqual(p.bid_due, "2026-10-15");
+  assert.strictEqual(p.prebid_date, "2026-10-01");
+  assert.strictEqual(p.state, "MO");
+  assert.strictEqual(p.status, "Qualified");
+});
+
+test("film types survive into score_json, which is where routing reads them", () => {
+  // matchCustomers sees film scope only through safeFilmTypes(), and that
+  // reads score_json. Drop it here and the engine routes on territory alone.
+  const p = opportunityToProject({ id: "a", name: "x", filmTypes: ["Security"] });
+  assert.deepStrictEqual(JSON.parse(p.score_json), { filmTypes: ["Security"] });
+});
+
+test("no film types means no score_json, not an empty one", () => {
+  const p = opportunityToProject({ id: "a", name: "x", filmTypes: [] });
+  assert.strictEqual(p.score_json, null);
+});
+
+test("a sparse opportunity still produces a valid project row", () => {
+  const p = opportunityToProject({ id: "bare" });
+  assert.strictEqual(p.id, "bare");
+  assert.strictEqual(p.name, "Untitled opportunity"); // name is NOT NULL in D1
+  assert.strictEqual(p.project_number, "");
+  assert.strictEqual(p.status, "New");
+  for (const [k, v] of Object.entries(p)) {
+    assert.notStrictEqual(v, undefined, k + " must not be undefined");
+  }
+});
+
+test("a null opportunity does not throw", () => {
+  assert.strictEqual(opportunityToProject(null).name, "Untitled opportunity");
+  assert.strictEqual(opportunityToProject(undefined).name, "Untitled opportunity");
+});
+
+test("film types that are not an array are ignored, not trusted", () => {
+  assert.strictEqual(opportunityToProject({ id: "a", filmTypes: "Security" }).score_json, null);
 });

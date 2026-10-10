@@ -26,8 +26,12 @@
       "id": "380da4d2f09540fc8619fe7056d048b5"
     }
   ],
+  // One invocation can only cover ~30 sources before it runs out of
+  // subrequests, so a single weekly trigger reached all 92 about once a month.
+  // Four runs a day x 30 sources = 120, which clears the whole registry every
+  // day. 11:30 UTC is the one that also sends the morning brief.
   "triggers": {
-    "crons": ["30 11 * * *"]
+    "crons": ["30 11 * * *", "30 15 * * *", "30 19 * * *", "30 23 * * *"]
   },
   "observability": { "enabled": true }
 }

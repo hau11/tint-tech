@@ -3188,8 +3188,11 @@ function DeliverLeads({opps}){
     if(!picked.length) return;
     setBusy(true); setMsg(""); setErr("");
     try{
+      // Deliver against the id the server resolved, not the one the dropdown
+      // carried: an opportunity can merge into a project row that already
+      // exists under a different id.
       const r = await api("/admin/leads/deliver", {method:"POST",
-        body:{ projectId, customerIds: picked, exclusivity }});
+        body:{ projectId: data?.project?.id || projectId, customerIds: picked, exclusivity }});
       // Partial failures are reported honestly by the API, so report them here
       // too rather than flattening the result into a single success message.
       const ok = (r?.delivered||[]).length, bad = (r?.failed||[]).length;

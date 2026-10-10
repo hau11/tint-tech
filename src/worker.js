@@ -484,7 +484,29 @@ function safeFilmTypes(project) {
   } catch { return []; }
 }
 
-async function handleLeadAdmin({ path, request, db, actor }) {
+// The Deliver screen's dropdown lists Opportunities (the KV document store)
+// while delivery, attribution and billing all hang off the D1 `projects`
+// table. Nothing mirrored one into the other, so every opportunity discovered
+// after the original seed answered "Project not found" and the screen worked
+// only for the two seeded rows. Resolving on demand rather than at import
+// time means the opportunities already sitting in the list start working too,
+// with no migration. The mapping itself is leadFlow.opportunityToProject.
+async function resolveProject(db, store, id) {
+  const direct = await db.first("SELECT * FROM projects WHERE id = ?", id);
+  if (direct) return direct;
+  if (!store) return null;
+  const opps = (await store.get("opportunities")) || [];
+  const opp = opps.find(o => o.id === id);
+  if (!opp) return null;
+  // upsertProject merges into an existing row rather than duplicating, so an
+  // opportunity that matches a project already in D1 resolves to that one.
+  // Its id may therefore differ from the opportunity's — callers must use the
+  // id on the row that comes back, not the one they asked with.
+  const { project } = await db.upsertProject(leadFlow.opportunityToProject(opp));
+  return project;
+}
+
+async function handleLeadAdmin({ path, request, db, store, actor }) {
   const actorLabel = actor.kind === "legacy-admin" ? "operator" : (actor.userId || "admin");
 
   if (path === "/api/admin/leads" && request.method === "GET") {
@@ -508,10 +530,10 @@ async function handleLeadAdmin({ path, request, db, actor }) {
   // operator sees who was considered rather than wondering who vanished.
   let sm = path.match(/^\/api\/admin\/leads\/suggest-customers\/([\w-]+)$/);
   if (sm && request.method === "GET") {
-    const project = await db.first("SELECT * FROM projects WHERE id = ?", sm[1]);
+    const project = await resolveProject(db, store, sm[1]);
     if (!project) return json({ error: "Project not found" }, 404);
     const customers = await db.all("SELECT * FROM customers");
-    const existing = await db.all("SELECT customer_id FROM leads WHERE project_id = ?", sm[1]);
+    const existing = await db.all("SELECT customer_id FROM leads WHERE project_id = ?", project.id);
     const ranked = matchCustomers(
       { ...project, filmTypes: safeFilmTypes(project) },
       customers || [],
@@ -531,11 +553,17 @@ async function handleLeadAdmin({ path, request, db, actor }) {
     if (!body.projectId || !customerIds.length)
       return json({ error: "projectId and at least one customerId are required." }, 400);
 
+    // Same resolution as the suggest endpoint: deliver against the project row,
+    // not the opportunity id the dropdown happened to carry.
+    const target = await resolveProject(db, store, body.projectId);
+    if (!target) return json({ error: "Project not found" }, 404);
+    const projectId = target.id;
+
     const delivered = [], failed = [];
     for (const customerId of customerIds) {
       try {
         const lead = await leadFlow.deliverLead(db, {
-          projectId: body.projectId, customerId,
+          projectId, customerId,
           exclusivity: body.exclusivity || "shared",
           attributionWindowDays: body.attributionWindowDays ?? 180,
           actorId: actor.userId, actorLabel,
@@ -546,7 +574,7 @@ async function handleLeadAdmin({ path, request, db, actor }) {
         // A failure here is reported but never rolls back the delivery —
         // the lead exists in our database either way.
         const [proj, cust] = await Promise.all([
-          db.first("SELECT * FROM projects WHERE id = ?", body.projectId),
+          db.first("SELECT * FROM projects WHERE id = ?", projectId),
           db.first("SELECT * FROM customers WHERE id = ?", customerId)
         ]);
         const hook = await webhooks.deliverWebhook(db, { lead, project: proj, customer: cust });
@@ -960,7 +988,7 @@ export default {
       /* ---- Admin: leads & attribution (Phase B) ---- */
       if (path.startsWith("/api/admin/leads") || path.startsWith("/api/admin/lead-events")
           || path === "/api/admin/activity" || path === "/api/admin/terms") {
-        const handled = await handleLeadAdmin({ path, request, db: makeDb(env), actor });
+        const handled = await handleLeadAdmin({ path, request, db: makeDb(env), store, actor });
         if (handled) return handled;
       }
 
@@ -2572,15 +2600,20 @@ export default {
         if (expired.expired) console.log("[leads] reservations expired:", expired.expired);
       } catch (e) { console.error("[leads] reservation expiry failed:", e.message); }
 
-      const isMonday = new Date(event.scheduledTime).getUTCDay() === 1;
+      // The morning brief goes out once a day, on the 11:30 UTC run; the other
+      // three runs exist only to finish the source sweep.
+      const scheduledHour = new Date(event.scheduledTime).getUTCHours();
+      const isDigestRun = event.cron ? event.cron.startsWith("30 11 ") : scheduledHour === 11;
       let scanSummary = null;
-      if (isMonday) {
+      {
         try {
           // A cron invocation gets the same 50-subrequest budget as any other,
-          // so it cannot sweep all 89 sources either -- this ran every Monday
-          // and failed every Monday, visible only in the logs. It now covers a
-          // few batches and resumes from the stored cursor next week, wrapping
-          // at the end, so every source is reached on a rolling basis.
+          // so it cannot sweep all 92 sources in one go. It covers three
+          // batches and resumes from the stored cursor on the next run,
+          // wrapping at the end. Running four times a day means 120 source
+          // checks against a registry of 92, so everything is reached daily --
+          // it used to run Mondays only, which took about a month to come
+          // round. See the crons in wrangler.jsonc.
           const CRON_BATCHES = 3;
           const meta = (await store.get("meta")) || {};
           let offset = Number(meta.discoveryCursor) || 0;
@@ -2597,16 +2630,18 @@ export default {
           await store.set("meta", meta);
           const okCount = sources.filter(s => s.status === "ok").length;
           scanSummary = `${okCount}/${sources.length} sources responded, ${newLeads} new leads.`;
-          console.log("[discovery] weekly:", scanSummary, "next cursor:", offset);
+          console.log("[discovery] scan:", scanSummary, "next cursor:", offset);
         } catch (e) {
           scanSummary = "Discovery scan failed: " + e.message;
-          console.error("[discovery] weekly failed:", e.message);
+          console.error("[discovery] scan failed:", e.message);
         }
-      } else {
-        console.log("[discovery] skipped — runs Mondays only");
       }
-      // Morning brief every day regardless, so deadlines and follow-ups still
-      // surface daily even on days the scan didn't run.
+      // The brief is the morning run's job only. The other three scan and stop,
+      // so finishing the sweep does not put four emails in the inbox.
+      if (!isDigestRun) {
+        console.log("[digest] skipped — not the morning run");
+        return;
+      }
       try {
         if (!env.RESEND_API_KEY || !env.DIGEST_TO) {
           console.log("[digest] skipped — RESEND_API_KEY / DIGEST_TO not configured");

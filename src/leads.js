@@ -690,3 +690,33 @@ export async function attributionRecord(db, lead) {
 export async function activeTerms(db) {
   return db.first("SELECT * FROM lead_terms_versions WHERE is_active = 1 ORDER BY created_at DESC");
 }
+
+/* ---------------- Opportunity -> Project ----------------
+   An Opportunity and a Project are the same thing in two stores. Opportunities
+   live in the KV document that Discovery imports into and that the Deliver
+   screen lists; leads, attribution and billing all hang off the D1 `projects`
+   table. Nothing mirrored one into the other, so an opportunity discovered
+   after the original seed had no project row and the Deliver screen answered
+   "Project not found" for it. Pure mapping, so it can be tested on its own. */
+export function opportunityToProject(opportunity) {
+  const opp = opportunity && typeof opportunity === "object" ? opportunity : {};
+  const filmTypes = Array.isArray(opp.filmTypes) ? opp.filmTypes : [];
+  return {
+    id: opp.id,
+    name: opp.name || "Untitled opportunity",
+    project_number: opp.bidNumber || "",
+    owner: opp.owner || null,
+    architect: opp.architect || null,
+    general_contractor: opp.gc || null,
+    city: opp.city || null, county: opp.county || null, state: opp.state || null,
+    project_type: opp.type || null,
+    bid_due: opp.bidDue || null, prebid_date: opp.preBid || null,
+    status: opp.status || "New",
+    source: opp.source || null, source_url: opp.source || null,
+    notes: opp.notes || null,
+    // matchCustomers reads film scope through safeFilmTypes(), which only looks
+    // in score_json. Without this the routing engine sees no film types at all.
+    score_json: filmTypes.length ? JSON.stringify({ filmTypes }) : null,
+    discovered_at: opp.discovered || null
+  };
+}
