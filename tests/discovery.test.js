@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SOURCES, SCAN_BATCH, scanSlice, REGIONS, regionOf, normalizeSource, sourceRegistry, selectSources, coverageByRegion, planSamQueries, samCooldownHours, SAM_CORE_QUERIES, SAM_EXTENDED_QUERIES, visibleTextLength, isStale } from "../src/discovery.js";
+import { SOURCES, SCAN_BATCH, scanSlice, REGIONS, regionOf, normalizeSource, sourceRegistry, selectSources, coverageByRegion, planSamQueries, samCooldownHours, SAM_CORE_QUERIES, SAM_EXTENDED_QUERIES, visibleTextLength, isStale, extractDates, parseGenericHtml } from "../src/discovery.js";
 
 /* The scan is batched because Cloudflare caps one Worker invocation at 50
    subrequests on the free plan. Scanning all 89 sources at once asked for
@@ -302,4 +302,63 @@ test("an unparsable bid date is kept rather than guessed at", () => {
 test("a lead found more than 60 days ago ages out", () => {
   const old = new Date(Date.now() - 61 * 86400000).toISOString().slice(0, 10);
   assert.equal(isStale({ foundAt: old }), true);
+});
+
+/* Lincoln University posted "LU26002 | 09 February 2026 | 20 February 2026 |
+   MLK Hall Window Replacement | Landyn Smith" and Discovery showed it as a
+   live lead in October with no bid date, twice -- once for the PDF and once
+   for the contact's mailto: link, which carried the whole row as its title. */
+
+test("extractDates reads slash dates", () => {
+  assert.deepEqual(extractDates("bids due 9/15/2026"), ["9/15/2026"]);
+  assert.deepEqual(extractDates("due 9/15/26"), ["9/15/2026"]);
+});
+
+test("extractDates reads day-month-year, which used to yield nothing", () => {
+  assert.deepEqual(extractDates("20 February 2026"), ["2/20/2026"]);
+  assert.deepEqual(extractDates("9 Feb. 2026"), ["2/9/2026"]);
+});
+
+test("extractDates reads month-day-year", () => {
+  assert.deepEqual(extractDates("February 9, 2026"), ["2/9/2026"]);
+  assert.deepEqual(extractDates("Feb 9 2026"), ["2/9/2026"]);
+  assert.deepEqual(extractDates("September 1st, 2026"), ["9/1/2026"]);
+});
+
+test("extractDates keeps document order so the last date is the closing date", () => {
+  const row = "LU26002 09 February 2026 20 February 2026 MLK Hall Window Replacement";
+  const dates = extractDates(row);
+  assert.deepEqual(dates, ["2/9/2026", "2/20/2026"]);
+  assert.equal(dates[dates.length - 1], "2/20/2026");
+});
+
+test("extractDates rejects impossible dates rather than inventing one", () => {
+  assert.deepEqual(extractDates("13/45/2026"), []);
+  assert.deepEqual(extractDates("32 February 2026"), []);
+  assert.deepEqual(extractDates("Smarch 9, 2026"), []);
+});
+
+test("extractDates returns nothing for text with no date", () => {
+  assert.deepEqual(extractDates("see solicitation for details"), []);
+  assert.deepEqual(extractDates(""), []);
+  assert.deepEqual(extractDates(null), []);
+});
+
+test("the February row is now dated, so it is recognised as closed", () => {
+  const row = "LU26002 09 February 2026 20 February 2026 MLK Hall Window Replacement";
+  const bidDate = extractDates(row).pop();
+  // Anything before mid-2026 is long past by the time this suite runs in Oct.
+  assert.equal(isStale({ bidDate }), new Date(bidDate).getTime() < Date.now() - 3 * 86400000);
+});
+
+test("a mailto link in the same row is a contact, not a second bid", () => {
+  const html = `<table><tr>
+      <td>LU26002</td><td>20 February 2026</td>
+      <td><a href="/bids/rfp-lu26002-mlk-hall-window-replacement.pdf">Martin Luther King Hall Window Replacement</a></td>
+      <td><a href="mailto:smithl2@lincolnu.edu">Landyn Smith</a></td>
+    </tr></table>`;
+  const leads = parseGenericHtml(html, { url: "https://www.lincolnu.edu/bids", name: "Lincoln University", state: "MO" }, null);
+  assert.equal(leads.length, 1);
+  assert.ok(!leads.some(l => (l.links.page || "").startsWith("mailto:")));
+  assert.equal(leads[0].bidDate, "2/20/2026");
 });

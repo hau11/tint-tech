@@ -454,6 +454,46 @@ export function parseFmdcHtml(html, terms) {
   return leads;
 }
 
+/* ---------------- Date extraction ---------------- */
+const MONTHS = {
+  jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
+  may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9, oct: 10, october: 10, nov: 11, november: 11,
+  dec: 12, december: 12
+};
+
+// Pulls every date out of a bid-board table row, in document order, normalised
+// to M/D/YYYY so isStale() can read them.
+//
+// This used to be a bare /\d{1,2}\/\d{1,2}\/\d{2,4}/ match, which meant any
+// board writing "20 February 2026" yielded NO bid date at all. A closed bid
+// with no date is indistinguishable from a live one with no date, so Lincoln
+// University's February RFP sat in the list in October looking current. Dates
+// we still cannot parse stay absent rather than being guessed at.
+export function extractDates(text) {
+  const s = String(text || "");
+  const found = [];
+  const push = (i, mo, d, y) => {
+    const yyyy = String(y).length === 2 ? "20" + y : String(y);
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return;
+    found.push({ i, v: `${mo}/${d}/${yyyy}` });
+  };
+  for (const m of s.matchAll(/\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/g))
+    push(m.index, +m[1], +m[2], m[3]);
+  // 9 February 2026 / 09 Feb. 2026
+  for (const m of s.matchAll(/\b(\d{1,2})\s+([A-Za-z]{3,9})\.?,?\s+(\d{4})\b/g)) {
+    const mo = MONTHS[m[2].toLowerCase()];
+    if (mo) push(m.index, mo, +m[1], m[3]);
+  }
+  // February 9, 2026 / Feb 9 2026 / February 9th, 2026
+  for (const m of s.matchAll(/\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b/g)) {
+    const mo = MONTHS[m[1].toLowerCase()];
+    if (mo) push(m.index, mo, +m[2], m[3]);
+  }
+  found.sort((a, b) => a.i - b.i);
+  return [...new Set(found.map(f => f.v))];
+}
+
 /* ---------------- Readable-text measure ---------------- */
 // How much text a human would actually see on this page. Used only to tell a
 // page that genuinely has no film work on it from one that rendered nothing
@@ -495,11 +535,16 @@ export function parseGenericHtml(html, src, terms) {
     if (cls.relevance === "excluded" || cls.relevance === "low") return;
     const relevance = cls.relevance;
     let href = $(a).attr("href") || "";
+    // A mailto:/tel: anchor is the buyer's contact detail sitting in the same
+    // table row as the bid, not a second bid. Lincoln University's board
+    // produced two "leads" for one RFP this way: the PDF, and the contact's
+    // email address carrying the whole row's text as its title.
+    if (/^\s*(mailto|tel|javascript|#)/i.test(href)) return;
     try { href = new URL(href, src.url).href; } catch { /* keep as-is */ }
     const key = (text + "|" + href).toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
-    const dates = context.match(/\d{1,2}\/\d{1,2}\/\d{2,4}/g) || [];
+    const dates = extractDates(context);
     leads.push({
       id: uid(),
       projectNo: (context.match(/\b(?:IFB|RFP|RFQ|BID|ITB)\s*#?\s*[0-9][0-9\w.-]*/i) || [""])[0].replace(/\s+/g," ").trim() || "-",
