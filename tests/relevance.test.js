@@ -308,3 +308,27 @@ test("plain glass work with no glazing scope is still not a film lead", () => {
   // The promotion must not drag in every mention of glass.
   assert.equal(classifyFilmRelevance("Annual glass repair").relevance, "excluded");
 });
+
+
+/* A veto and a plain no-match both come back "excluded", but they mean very
+   different things to a caller. parseGenericHtml has to tell them apart: a
+   veto found only in borrowed page context must not bury a title that
+   qualifies on its own. */
+
+test("a vetoed classification names the term that vetoed it", () => {
+  const c = classifyFilmRelevance("Window Shades & Maintenance");
+  assert.equal(c.relevance, "excluded");
+  assert.equal(c.excludedBy, "shade");
+});
+
+test("text that simply matches nothing is excluded with no veto term", () => {
+  const c = classifyFilmRelevance("Playground equipment purchase");
+  assert.equal(c.relevance, "excluded");
+  assert.ok(!c.excludedBy);
+});
+
+test("explicit film language still beats a veto term", () => {
+  const c = classifyFilmRelevance("Blinds, shades and window film replacement");
+  assert.equal(c.relevance, "high");
+  assert.ok(!c.excludedBy);
+});

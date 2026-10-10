@@ -362,3 +362,34 @@ test("a mailto link in the same row is a contact, not a second bid", () => {
   assert.ok(!leads.some(l => (l.links.page || "").startsWith("mailto:")));
   assert.equal(leads[0].bidDate, "2/20/2026");
 });
+
+/* The 16th Circuit Court lists every bid as a sibling inside one container, so
+   the context parseGenericHtml borrows for one link contains its neighbours'
+   titles. "IFB 10014608-26-29 Window Shades & Maintenance" sat above "Bid
+   10015707 Glass and Glazing Services" and vetoed it: a live glazing contract
+   never reached the board. Context may add signal; it must not veto. */
+
+const SIBLING_BIDS = `<div class="bids">
+  <a href="/bids/shades.pdf">IFB 10014608-26-29 Window Shades &amp; Maintenance</a>
+  <a href="/bids/glazing.pdf">Bid 10015707 Glass and Glazing Services</a>
+</div>`;
+
+test("a neighbour's excluded title does not bury a qualifying bid", () => {
+  const leads = parseGenericHtml(SIBLING_BIDS, { url: "https://www.16thcircuit.org/bid-opportunities", name: "16th Circuit", state: "MO" }, null);
+  const titles = leads.map(l => l.title);
+  assert.ok(titles.some(t => /Glass and Glazing Services/.test(t)), "the glazing bid must survive its neighbour");
+});
+
+test("the excluded neighbour itself is still excluded", () => {
+  const leads = parseGenericHtml(SIBLING_BIDS, { url: "https://www.16thcircuit.org/bid-opportunities", name: "16th Circuit", state: "MO" }, null);
+  assert.ok(!leads.some(l => /Window Shades/.test(l.title)), "window shades is not film work");
+});
+
+test("context can still promote a link whose own text is uninformative", () => {
+  // The other half of the rule: a bare "Download" link next to real glazing
+  // scope must keep being picked up from its context.
+  // Wrapped in a table on purpose: the HTML parser discards a bare <tr>.
+  const html = `<table><tr><td>Curtain wall replacement, Building 4</td><td><a href="/x.pdf">Download the IFB</a></td></tr></table>`;
+  const leads = parseGenericHtml(html, { url: "https://example.gov/bids", name: "Example", state: "MO" }, null);
+  assert.equal(leads.length, 1);
+});

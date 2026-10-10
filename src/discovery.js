@@ -539,7 +539,16 @@ export function parseGenericHtml(html, src, terms) {
     const hay = text + " " + context;
     if (text.length < 8) return;
     if (/^(home|about|contact|login|register|back|next|menu|search)$/i.test(text)) return;
-    const cls = classifyFilmRelevance(hay, terms);
+    // Context is borrowed from whatever container the anchor happens to sit
+    // in. On a board that lists every bid as a sibling in one div, that means
+    // a neighbour's title lands in this lead's text: the 16th Circuit Court's
+    // "Glass and Glazing Services" was being excluded by the "Window Shades &
+    // Maintenance" posting listed above it. Context may ADD signal; it must
+    // never veto a title that qualifies on its own.
+    const own = classifyFilmRelevance(text, terms);
+    const withContext = classifyFilmRelevance(hay, terms);
+    const cls = (withContext.excludedBy && !own.excludedBy && own.relevance !== "excluded")
+      ? own : withContext;
     if (cls.relevance === "excluded" || cls.relevance === "low") return;
     const relevance = cls.relevance;
     let href = $(a).attr("href") || "";

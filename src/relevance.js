@@ -182,6 +182,10 @@ export function classifyFilmRelevance(text, custom) {
       score: 0,
       reasons: [`Not film work — matched "${exclusionHits[0]}"`],
       filmTypes: [],
+      // Which term vetoed it, so a caller can tell a veto apart from a plain
+      // no-match. parseGenericHtml needs that distinction: a veto found only
+      // in borrowed page context must not bury a title that stands on its own.
+      excludedBy: exclusionHits[0],
       matched: { film: [], glazing: glazHits }
     };
   }
