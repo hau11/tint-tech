@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SOURCES, SCAN_BATCH, scanSlice, REGIONS, regionOf, normalizeSource, sourceRegistry, selectSources, coverageByRegion, planSamQueries, samCooldownHours, SAM_CORE_QUERIES, SAM_EXTENDED_QUERIES } from "../src/discovery.js";
+import { SOURCES, SCAN_BATCH, scanSlice, REGIONS, regionOf, normalizeSource, sourceRegistry, selectSources, coverageByRegion, planSamQueries, samCooldownHours, SAM_CORE_QUERIES, SAM_EXTENDED_QUERIES, visibleTextLength } from "../src/discovery.js";
 
 /* The scan is batched because Cloudflare caps one Worker invocation at 50
    subrequests on the free plan. Scanning all 89 sources at once asked for
@@ -224,4 +224,41 @@ test("every SAM query is a title search or a NAICS sweep, never both", () => {
   for (const q of [...SAM_CORE_QUERIES, ...SAM_EXTENDED_QUERIES]) {
     assert.ok(Boolean(q.title) !== Boolean(q.ncode), JSON.stringify(q));
   }
+});
+
+
+/* visibleTextLength decides whether a source that produced no leads actually
+   had nothing, or was a JavaScript portal we never managed to read. It used to
+   be cheerio's body .text(), which counts <script> contents as text -- so the
+   emptier a JS portal was, the more "text" it appeared to have, and the app
+   reported it as searched. That is exactly the claim this codebase must not
+   make about a source it cannot read. */
+
+test("visibleTextLength ignores script, style and comment contents", () => {
+  const html = "<html><body><script>" + "x".repeat(5000) + "</script>" +
+    "<style>" + "y".repeat(5000) + "</style>" +
+    "<!-- " + "z".repeat(5000) + " -->" +
+    "<p>Bid opportunities</p></body></html>";
+  assert.equal(visibleTextLength(html), "Bid opportunities".length);
+});
+
+test("visibleTextLength flags a JS portal that cheerio would have passed", () => {
+  // A real shape: a shell page whose listings arrive by fetch.
+  const portal = "<html><body><div id=app></div><script>" + "var a=1;".repeat(2000) + "</script></body></html>";
+  assert.ok(visibleTextLength(portal) < 600);
+});
+
+test("visibleTextLength counts real page text", () => {
+  const page = "<html><body><table><tr><td>IFB 24-101</td><td>Window glazing replacement</td></tr></table></body></html>";
+  assert.equal(visibleTextLength(page), "IFB 24-101 Window glazing replacement".length);
+});
+
+test("visibleTextLength separates adjacent tags instead of gluing text", () => {
+  assert.equal(visibleTextLength("<td>one</td><td>two</td>"), "one two".length);
+});
+
+test("visibleTextLength is safe on empty and non-string input", () => {
+  assert.equal(visibleTextLength(""), 0);
+  assert.equal(visibleTextLength(null), 0);
+  assert.equal(visibleTextLength(undefined), 0);
 });

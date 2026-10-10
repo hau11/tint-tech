@@ -454,6 +454,30 @@ export function parseFmdcHtml(html, terms) {
   return leads;
 }
 
+/* ---------------- Readable-text measure ---------------- */
+// How much text a human would actually see on this page. Used only to tell a
+// page that genuinely has no film work on it from one that rendered nothing
+// because its listings are drawn by JavaScript.
+//
+// This deliberately does NOT use cheerio, for two reasons:
+//
+// 1. Correctness. cheerio's .text() includes the contents of <script> tags,
+//    because they are text nodes. A JS-rendered portal is mostly script, so it
+//    scored tens of thousands of "characters" and was reported as a source that
+//    answered fine and simply had nothing — when in truth we never read it.
+//    stlouiscounty measured 3383 that way and has 16 readable characters.
+// 2. Cost. It was a second full DOM parse of a page parseGenericHtml had
+//    already parsed: ~876ms of CPU across 31 sources, against ~77ms here.
+export function visibleTextLength(html) {
+  return String(html || "")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<(script|style|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&[a-z#0-9]+;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim().length;
+}
+
 /* ---------------- Generic link/text scanner ---------------- */
 export function parseGenericHtml(html, src, terms) {
   // insert whitespace between adjacent tags so table cells don't glue together
@@ -651,10 +675,10 @@ async function scanOne(src, env, store, terms) {
     const html = await res.text();
     const leads = src.kind === "fmdc" ? parseFmdcHtml(html, terms) : parseGenericHtml(html, src, terms);
     // Heuristic: JS-rendered portals return pages with almost no readable text.
-    // Only worth a full DOM parse when the cheap parser found nothing; doing it
-    // on every page spent CPU on exactly the sources that already worked.
+    // Only checked when the parser found nothing, since a page that yielded
+    // leads has self-evidently been read.
     if (leads.length === 0) {
-      const textLen = cheerio.load(html)("body").text().replace(/\s+/g, " ").length;
+      const textLen = visibleTextLength(html);
       if (textLen < 600) {
         return { status: "js-portal", found: 0, leads: [], error: src.note || "Page renders with JavaScript - check it manually." };
       }

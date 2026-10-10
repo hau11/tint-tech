@@ -3295,16 +3295,40 @@ function Discovery({onImported}){
     // cannot make the ~96 subrequests all 89 sources need. Walk the cursor it
     // hands back until it says done, showing progress as each batch lands.
     const seen = []; let newLeads = 0; let offset = 0; let guard = 0;
+    // A batch that fails must not end the scan. One slice returning HTTP 503
+    // used to abort at 50 of 92 and the remaining 42 sources — which were
+    // perfectly reachable — went unchecked, while the UI reported only the
+    // failure. Retry the slice once, then step over it and carry on, and say
+    // at the end how many were skipped rather than quietly under-reporting.
+    let skipped = 0; let step = 10; let lastErr = "";
     try{
       for(;;){
-        const r = await api("/discovery/run", {method:"POST", body:{offset, states:geoStates, regions:geoRegions}});
+        let r = null;
+        for(let attempt=0; attempt<2 && !r; attempt++){
+          try{
+            r = await api("/discovery/run", {method:"POST", body:{offset, states:geoStates, regions:geoRegions}});
+          }catch(e){
+            lastErr = e.message;
+            if(attempt===0) await new Promise(res=>setTimeout(res,1200));
+          }
+        }
+        if(!r){
+          skipped += step;
+          offset += step;
+          setMsg(`Scanning… ${seen.length} checked, ${skipped} skipped after errors.`);
+          if(++guard > 100) break;
+          continue;
+        }
         seen.push(...(Array.isArray(r?.sources)?r.sources:[]));
         newLeads += Number(r?.new) || 0;
         if(Array.isArray(r?.leads)) setLeads(r.leads);
         setSources([...seen]);
         const total = Number(r?.total) || seen.length;
-        setMsg(`Scanning… ${Math.min(seen.length,total)} of ${total} sources checked.`);
+        setMsg(`Scanning… ${Math.min(seen.length+skipped,total)} of ${total} sources checked.`);
         const next = Number(r?.nextOffset);
+        // Remember the server's own slice size so a skipped batch steps by the
+        // same amount instead of a hardcoded guess.
+        if(Number.isFinite(next) && next > offset) step = next - offset;
         // Stop on done, and also if the cursor ever fails to advance, so a
         // malformed response cannot spin this loop forever.
         if(r?.done || !Number.isFinite(next) || next <= offset) break;
@@ -3313,6 +3337,7 @@ function Discovery({onImported}){
       }
       const ok = seen.filter(s=>s.status==="ok").length;
       setMsg(`Scan complete — ${ok}/${seen.length} sources responded, ${newLeads} new leads.`);
+      if(skipped) setErr(`${skipped} source${skipped===1?"":"s"} were skipped — the server failed on those batches (${lastErr}). Everything else was checked.`);
     }catch(e){ setErr("Scan failed: " + e.message); }
     setScanning(false);
   };
