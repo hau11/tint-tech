@@ -694,7 +694,7 @@ async function scanOne(src, env, store, terms) {
 // lead forever — including ones seeded/classified under an older version
 // of relevance.js, or whose bid deadline has simply already passed — so the
 // cached list only ever grows and old noise never ages out on its own.
-function isStale(lead) {
+export function isStale(lead) {
   const AGE_LIMIT_MS = 60 * 24 * 60 * 60 * 1000; // 60 days
   if (lead.foundAt) {
     const foundMs = new Date(lead.foundAt).getTime();
@@ -754,12 +754,19 @@ export async function runDiscovery(env, store, { offset = 0, limit = SCAN_BATCH,
     ...opportunities.map(o => (o.bidNumber || "").toLowerCase()).filter(Boolean)
   ]);
   const fresh = [];
+  let expired = 0;
   for (const r of results) {
     for (const l of r.leads) {
       const k = (l.source + "|" + l.title).toLowerCase();
       const bidKey = (l.projectNo || "").toLowerCase();
       if (known.has(k) || (bidKey && bidKey !== "-" && known.has(bidKey))) continue;
       known.add(k);
+      // A lead whose bid date has already passed is dead on arrival. These used
+      // to be counted in "new" and stored anyway, then dropped by the NEXT
+      // batch's stale filter on the way back in -- so a scan could honestly
+      // report "3 new leads" and leave only 2 on screen, with nothing to say
+      // where the third went. Count them separately and say so instead.
+      if (isStale(l)) { expired++; continue; }
       fresh.push(l);
     }
   }
@@ -796,6 +803,7 @@ export async function runDiscovery(env, store, { offset = 0, limit = SCAN_BATCH,
   return {
     sources: results.map(r => ({ id: r.src.id, name: r.src.name, status: r.status, found: r.found, error: r.error || null })),
     new: fresh.length,
+    expired,
     leads: updated,
     offset: plan.start,
     nextOffset: plan.nextOffset,

@@ -3300,7 +3300,7 @@ function Discovery({onImported}){
     // perfectly reachable — went unchecked, while the UI reported only the
     // failure. Retry the slice once, then step over it and carry on, and say
     // at the end how many were skipped rather than quietly under-reporting.
-    let skipped = 0; let step = 10; let lastErr = "";
+    let skipped = 0; let step = 10; let lastErr = ""; let expired = 0;
     try{
       for(;;){
         let r = null;
@@ -3321,6 +3321,7 @@ function Discovery({onImported}){
         }
         seen.push(...(Array.isArray(r?.sources)?r.sources:[]));
         newLeads += Number(r?.new) || 0;
+        expired += Number(r?.expired) || 0;
         if(Array.isArray(r?.leads)) setLeads(r.leads);
         setSources([...seen]);
         const total = Number(r?.total) || seen.length;
@@ -3336,7 +3337,10 @@ function Discovery({onImported}){
         if(++guard > 100) break;
       }
       const ok = seen.filter(s=>s.status==="ok").length;
-      setMsg(`Scan complete — ${ok}/${seen.length} sources responded, ${newLeads} new leads.`);
+      // "new" must equal what you can actually see in the list below. Anything
+      // dropped is named, not quietly subtracted.
+      setMsg(`Scan complete — ${ok}/${seen.length} sources responded, ${newLeads} new lead${newLeads===1?"":"s"}.`
+        + (expired ? ` ${expired} more matched but the bid date had already passed.` : ""));
       if(skipped) setErr(`${skipped} source${skipped===1?"":"s"} were skipped — the server failed on those batches (${lastErr}). Everything else was checked.`);
     }catch(e){ setErr("Scan failed: " + e.message); }
     setScanning(false);

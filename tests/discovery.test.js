@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SOURCES, SCAN_BATCH, scanSlice, REGIONS, regionOf, normalizeSource, sourceRegistry, selectSources, coverageByRegion, planSamQueries, samCooldownHours, SAM_CORE_QUERIES, SAM_EXTENDED_QUERIES, visibleTextLength } from "../src/discovery.js";
+import { SOURCES, SCAN_BATCH, scanSlice, REGIONS, regionOf, normalizeSource, sourceRegistry, selectSources, coverageByRegion, planSamQueries, samCooldownHours, SAM_CORE_QUERIES, SAM_EXTENDED_QUERIES, visibleTextLength, isStale } from "../src/discovery.js";
 
 /* The scan is batched because Cloudflare caps one Worker invocation at 50
    subrequests on the free plan. Scanning all 89 sources at once asked for
@@ -261,4 +261,45 @@ test("visibleTextLength is safe on empty and non-string input", () => {
   assert.equal(visibleTextLength(""), 0);
   assert.equal(visibleTextLength(null), 0);
   assert.equal(visibleTextLength(undefined), 0);
+});
+
+/* A scan reported "3 new leads" and showed 2. The third was real, matched the
+   classifier, and had a bid date that had already passed: runDiscovery counted
+   and stored it, then the next batch filtered it out on the way back in. The
+   count and the list have to agree, so expired leads are counted separately
+   and the UI names them. */
+
+const daysAway = n => {
+  const d = new Date(Date.now() + n * 86400000);
+  return (d.getMonth() + 1) + "/" + d.getDate() + "/" + d.getFullYear();
+};
+
+test("a lead whose bid date has passed is stale", () => {
+  assert.equal(isStale({ bidDate: daysAway(-30) }), true);
+});
+
+test("a lead due in the future is not stale", () => {
+  assert.equal(isStale({ bidDate: daysAway(30) }), false);
+});
+
+test("a bid due today survives the 3-day grace period", () => {
+  assert.equal(isStale({ bidDate: daysAway(0) }), false);
+  assert.equal(isStale({ bidDate: daysAway(-2) }), false);
+});
+
+test("a lead with no bid date at all is kept, not discarded", () => {
+  // Most generic boards give no parsable date. Dropping those would throw away
+  // the majority of what Discovery finds.
+  assert.equal(isStale({ bidDate: "", foundAt: new Date().toISOString().slice(0, 10) }), false);
+  assert.equal(isStale({ foundAt: new Date().toISOString().slice(0, 10) }), false);
+});
+
+test("an unparsable bid date is kept rather than guessed at", () => {
+  assert.equal(isStale({ bidDate: "see solicitation" }), false);
+  assert.equal(isStale({ bidDate: "13/45/2026" }), false);
+});
+
+test("a lead found more than 60 days ago ages out", () => {
+  const old = new Date(Date.now() - 61 * 86400000).toISOString().slice(0, 10);
+  assert.equal(isStale({ foundAt: old }), true);
 });
