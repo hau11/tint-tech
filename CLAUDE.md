@@ -13,7 +13,7 @@ documents, KV for cache. Frontend is React built with esbuild into two
 bundles. No framework, no ORM, no build step for the worker itself.
 
 ```bash
-npm test              # node --test, 343 passing — keep it that way
+npm test              # node --test, 445 passing — keep it that way
 npm run build         # builds public/app.js and public/portal.js
 npx wrangler dev      # local
 npx wrangler deploy
@@ -70,6 +70,22 @@ what tells you whether SAM.gov or BlueBook is worth the spend.
 **A self-reported win is not a confirmed award.** `billingTrigger(lead,'won')`
 requires `award_confirmed_at`. A customer clicking "we won" flags the event
 `self_reported: true` and does not make the lead billable.
+
+**An Opportunity and a Project are the same thing in two stores.** Opportunities
+live in the KV document that Discovery imports into and that the Deliver Leads
+dropdown lists; leads, attribution and billing all key off the D1 `projects`
+table. Nothing mirrors one into the other, so `worker.js:resolveProject()`
+upserts on demand via `leadFlow.opportunityToProject()`. It may return a row
+whose id differs from the one you asked with — always use the id on the row
+that comes back. Before this existed, every opportunity found after the
+original seed answered "Project not found" on the Deliver screen.
+
+**Scraped context may add signal but must never veto a lead.**
+`parseGenericHtml` borrows context from whichever container an anchor sits in,
+which on many boards contains the neighbouring bids' titles. A neighbour's
+"Window Shades" was excluding the "Glass and Glazing Services" posting beside
+it. `classifyFilmRelevance` returns `excludedBy` so a veto can be told apart
+from a plain no-match; keep that distinction.
 
 **Customer isolation is a single chokepoint** in `worker.js`: a contractor
 session may only reach `/api/portal/*`. It's a default-deny allowlist, so a
