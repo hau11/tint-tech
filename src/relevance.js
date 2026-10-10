@@ -81,6 +81,11 @@ const GLAZING_STRONG = [
   "window replacement", "replace windows", "replacement windows",
   "storefront", "store front", "curtain wall", "curtainwall",
   "glazing package", "glazing contractor", "window systems", "window system",
+  // A standing glass-and-glazing services contract is the glazier's whole
+  // scope, which is the single best place to be sitting when film comes up.
+  // "glazing" alone is only tier 2, so Jackson County's "Bid 10015707 Glass
+  // and Glazing Services" scored 12 and was hidden as low.
+  "glass and glazing", "glazing services", "glass & glazing",
   "glass partition", "glass wall", "window wall",
   "security glazing", "blast resistant glazing", "blast-resistant glazing",
   "forced entry resistance", "forced-entry resistance", "attack resistant glazing",

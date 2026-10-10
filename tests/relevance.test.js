@@ -288,3 +288,23 @@ test("the defaults are exposed so a settings screen can show them", () => {
     assert.ok(Array.isArray(DEFAULT_TERMS[k]) && DEFAULT_TERMS[k].length, k);
   }
 });
+
+
+/* Jackson County's 16th Circuit Court posted "Bid 10015707 Glass and Glazing
+   Services" -- a standing contract for the glazier's entire scope, which is the
+   best place a film contractor can be sitting. It scored 12 and was hidden as
+   "low", because "glazing" on its own is only tier 2. */
+
+test("a glass and glazing services contract is worth a look on its own", () => {
+  const c = classifyFilmRelevance("Bid 10015707 Glass and Glazing Services");
+  assert.equal(c.relevance, "medium");
+});
+
+test("the ampersand spelling grades the same as the word", () => {
+  assert.equal(classifyFilmRelevance("Glass & Glazing Services").relevance, "medium");
+});
+
+test("plain glass work with no glazing scope is still not a film lead", () => {
+  // The promotion must not drag in every mention of glass.
+  assert.equal(classifyFilmRelevance("Annual glass repair").relevance, "excluded");
+});

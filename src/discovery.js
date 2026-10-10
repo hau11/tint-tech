@@ -40,8 +40,11 @@ export const SOURCES = [
   { id: "jacksonco", name: "Jackson County MO purchasing", kind: "generic",
     url: "https://www.jacksongov.org/Government/Departments/Finance-Purchasing/Doing-Business-With-Jackson-County", state: "MO",
     note: "Formal solicitations post to Bonfire/DemandStar (JS portals); this page announces them." },
-  { id: "circuit16", name: "16th Circuit Family Court bids", kind: "generic",
-    url: "https://www.16thcircuit.org/family-court-bids", state: "MO" },
+  // /family-court-bids has 404'd for some time; the court moved its postings
+  // to /bid-opportunities, which currently carries a glass and glazing
+  // services IFB. Verified 2026-10-10.
+  { id: "circuit16", name: "16th Circuit Court bids", kind: "generic",
+    url: "https://www.16thcircuit.org/bid-opportunities", state: "MO" },
   { id: "joco", name: "Johnson County KS (IonWave)", kind: "generic",
     url: "https://jocogov.ionwave.net/CurrentSourcingEvents.aspx", state: "KS",
     note: "IonWave's own robots.txt disallows automated access to this page, so we don't scrape it — check it by hand." },
@@ -78,9 +81,12 @@ export const SOURCES = [
   { id: "leessummit", name: "Lee's Summit MO solicitations", kind: "generic",
     url: "https://cityofls.net/procurement-contract-services/solicitation-information", state: "MO",
     note: "Construction docs live on QuestCDN; this page lists open solicitations." },
+  // The city moved from opkansas.org to opkansas.gov and the old path 404s.
+  // /bids-and-proposals is the page their own sitemap points at. Verified
+  // 2026-10-10: it answers, but renders its listings client-side, so expect
+  // it to report as a JS portal until an adapter exists.
   { id: "overlandpark", name: "Overland Park KS bids", kind: "generic",
-    url: "https://www.opkansas.org/doing-business/bids-proposals/", state: "KS",
-    note: "Best-known URL - first scan will confirm." },
+    url: "https://www.opkansas.gov/bids-and-proposals", state: "KS" },
   // Site itself loads fine in a real browser; it's specifically our old
   // research UA that got 403'd (same bot wall as kcmo/bluevalley above).
   { id: "olathecity", name: "City of Olathe KS procurement", kind: "generic",
@@ -133,8 +139,10 @@ export const SOURCES = [
   { id: "topeka", name: "City of Topeka KS purchasing", kind: "generic",
     url: "https://www.topeka.gov/business/suppliers/index.php", state: "KS",
     note: "Bids post to the city's Tyler e-pro portal (JS, login-gated); this page only announces them." },
-  { id: "lawrence", name: "City of Lawrence KS purchasing", kind: "generic",
-    url: "https://lawrenceks.gov/finance/purchasing/", state: "KS",
+  // /finance/purchasing/ 404s since the site was rebuilt; /Events/Bid-Openings
+  // is the page that now answers. Verified 2026-10-10.
+  { id: "lawrence", name: "City of Lawrence KS bid openings", kind: "generic",
+    url: "https://www.lawrenceks.gov/Events/Bid-Openings", state: "KS",
     note: "Bids post to an OpenGov eProcurement portal that blocks automated requests; this page only announces them." },
   { id: "wichitaschools", name: "Wichita Public Schools (USD 259) purchasing", kind: "generic",
     url: "https://www.publicpurchase.com/gems/259usdwichita,ks/buyer/public/home", state: "KS",
